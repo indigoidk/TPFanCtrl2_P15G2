@@ -218,7 +218,7 @@ void StartWorkerThread() {
 void StopWorkerThread() {
     ::PostMessage(g_dialogWnd, WM_COMMAND, 5020, 0);
 	::WaitForSingleObject(g_workerThread, INFINITE);
-	::CloseHandle(g_workerThread);
+	// Note: do NOT CloseHandle here — _beginthread auto-closes its handle on thread exit
 }
 
 void WorkerThread(void *dummy) {

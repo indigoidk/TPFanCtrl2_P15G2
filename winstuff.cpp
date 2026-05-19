@@ -302,12 +302,9 @@ TASKBARICON::SetBalloon(ULONG flags, const char* title, const char* text, int ti
 	lstrcpyn(nof.szInfo, text, sizeof(nof.szInfo) - 1);
 	lstrcpyn(nof.szInfoTitle, title, sizeof(nof.szInfoTitle) - 1);
 
-	return Shell_NotifyIcon(NIM_MODIFY, &nof);
-
-	// try to rebuild if SetBalloon failed
+	ok = Shell_NotifyIcon(NIM_MODIFY, &nof);
 
 	if (!ok)
-
 		this->RebuildIfNecessary(TRUE);
 
 	return ok;
