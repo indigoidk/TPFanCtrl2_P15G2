@@ -103,8 +103,27 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 	// theme defaults (overridable via TPFanControl.ini, toggled in-app)
 	this->ShowTempHex = 0;
-	this->ShowLog = 1;
-	this->DarkMode = 0;
+	this->ShowLog = 0;
+	this->DarkMode = 1;
+	// Detect if TVic drivers were left hidden (e.g., after a previous crash in game mode).
+	// Require both files to be absent/backed-up; a partial state leaves m_driversHidden false.
+	// Disable WOW64 FS redirection: this is a 32-bit process; without this, System32 maps to
+	// SysWOW64 and the driver files are never found.
+	{
+		typedef BOOL (WINAPI *PFN_Disable)(PVOID*);
+		typedef BOOL (WINAPI *PFN_Revert)(PVOID);
+		HMODULE hK = ::GetModuleHandleA("kernel32.dll");
+		PFN_Disable pfnOff = hK ? (PFN_Disable)::GetProcAddress(hK, "Wow64DisableWow64FsRedirection") : NULL;
+		PFN_Revert  pfnOn  = hK ? (PFN_Revert) ::GetProcAddress(hK, "Wow64RevertWow64FsRedirection")  : NULL;
+		PVOID fsOld = NULL;
+		bool redir = pfnOff && pfnOff(&fsOld);
+		this->m_driversHidden =
+			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicHW64.sys")       == INVALID_FILE_ATTRIBUTES) &&
+			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicHW64.sys.bak")   != INVALID_FILE_ATTRIBUTES) &&
+			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicPort64.sys")     == INVALID_FILE_ATTRIBUTES) &&
+			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicPort64.sys.bak") != INVALID_FILE_ATTRIBUTES);
+		if (redir) pfnOn(fsOld);
+	}
 	this->m_hbrDlg = NULL;
 	this->m_hbrField = NULL;
 	this->m_clrText = RGB(32, 32, 32);
@@ -397,7 +416,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	if (this->hwndDialog) {
 		::GetWindowText(this->hwndDialog, this->Title, sizeof(this->Title));
 
-		strcat_s(this->Title, sizeof(this->Title), " V" FANCONTROLVERSION);
 		strcat_s(this->Title, sizeof(this->Title), this->Title3);
 
 		::SetWindowText(this->hwndDialog, this->Title);
@@ -413,6 +431,28 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 		::SetDlgItemText(this->hwndDialog, 8310, buf);
 		this->hPowerNotify = RegisterPowerSettingNotification(this->hwndDialog, &GUID_LIDSWITCH_STATE_CHANGE, DEVICE_NOTIFY_WINDOW_HANDLE);
 		this->InitThemeAndChrome();
+
+		// Balloon tooltip on "Game mode (Hide Drivers)" checkbox
+		HWND hwndGM = ::GetDlgItem(this->hwndDialog, 7013);
+		if (hwndGM) {
+			this->m_hwndTip = ::CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
+				WS_POPUP | TTS_ALWAYSTIP | TTS_BALLOON,
+				CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+				this->hwndDialog, NULL, this->hinstapp, NULL);
+			if (this->m_hwndTip) {
+				::SendMessage(this->m_hwndTip, TTM_SETMAXTIPWIDTH, 0, 320);
+				TOOLINFO ti = {};
+				ti.cbSize   = sizeof(TOOLINFO);
+				ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+				ti.hwnd     = this->hwndDialog;
+				ti.uId      = (UINT_PTR)hwndGM;
+				ti.lpszText = (LPSTR)"Renames TVicHW64.sys and TVicPort64.sys to .sys.bak "
+				              "in System32\\drivers, hiding them from Valorant's Vanguard "
+				              "anti-cheat (ring 0 kernel access). Files are automatically "
+				              "restored when Game Mode is disabled or the app exits cleanly.";
+				::SendMessage(this->m_hwndTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+			}
+		}
 	}
 
 	if (SlimDialog == 1) {
@@ -481,7 +521,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 		if (!NoWaitMessage) {
 			sprintf_s(bufsec, sizeof(bufsec),
-				"TPFanControl is started %d sec. after\nboot time (SecWinUptime=%d sec.)\n\nTo prevent missing systray icons\nand communication errors between\nTPFanControl and embedded controller\nit will sleep for %d sec. (SecStartDelay)\n\nTo void this message box please set\nNoWaitMessage=1 in TPFanControl.ini",
+				"TPFanControl v2.33 P15G2 Dual is started %d sec. after\nboot time (SecWinUptime=%d sec.)\n\nTo prevent missing systray icons\nand communication errors between\nTPFanControl v2.33 P15G2 Dual and embedded controller\nit will sleep for %d sec. (SecStartDelay)\n\nTo void this message box please set\nNoWaitMessage=1 in TPFanControl.ini",
 				(int)(tickCount / 1000), SecWinUptime, SecStartDelay);
 
 			// Don't show message box when running as service on Vista+
@@ -494,7 +534,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 			if (isVistaOrLater && Runs_as_service == TRUE)
 				;
 			else
-				MessageBox(NULL, bufsec, "TPFanControl is sleeping", MB_ICONEXCLAMATION);
+				MessageBox(NULL, bufsec, "TPFanControl v2.33 P15G2 Dual is sleeping", MB_ICONEXCLAMATION);
 		}
 	}
 
@@ -507,7 +547,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	// taskbaricon (keep code after reading config)
 	if (this->MinimizeToSysTray) {
 		if (!this->ShowTempIcon) {
-			this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl");
+			this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.33 P15G2 Dual");
 		}
 		else {
 			this->pTaskbarIcon = NULL;
@@ -557,6 +597,9 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 //  destructor
 //-------------------------------------------------------------------------
 FANCONTROL::~FANCONTROL() {
+	if (this->m_driversHidden)
+		this->ToggleGameMode();   // restore TVic drivers on clean exit
+
 	if (this->hThread) {
 		::WaitForSingleObject(this->hThread, 2000);
 		this->hThread = NULL;
@@ -678,6 +721,12 @@ FANCONTROL::ApplyTheme() {
 			::DrawMenuBar(this->hwndDialog);
 		}
 
+		// RichEdit temp list: set its background directly (doesn't use WM_CTLCOLOREDIT)
+		HWND hRich = ::GetDlgItem(this->hwndDialog, 8101);
+		if (hRich)
+			::SendMessage(hRich, EM_SETBKGNDCOLOR, 0, (LPARAM)fieldbg);
+
+		this->UpdateTempList();
 		::InvalidateRect(this->hwndDialog, NULL, TRUE);
 	}
 }
@@ -690,15 +739,21 @@ FANCONTROL::InitThemeAndChrome() {
 	if (!this->hwndDialog) return;
 
 	// two/three aligned columns in the temperature list (name | temp | hex)
-	DWORD tabs[2] = { 40, 80 };
-	::SendDlgItemMessage(this->hwndDialog, 8101, EM_SETTABSTOPS, 2, (LPARAM)tabs);
-	::InvalidateRect(::GetDlgItem(this->hwndDialog, 8101), NULL, TRUE);
+	// RichEdit uses PARAFORMAT2 tab stops (in twips: ~40 and ~80 dialog units)
+	PARAFORMAT2 pf = {};
+	pf.cbSize = sizeof(PARAFORMAT2);
+	pf.dwMask = PFM_TABSTOPS;
+	pf.cTabCount = 2;
+	pf.rgxTabs[0] = 840;
+	pf.rgxTabs[1] = 1680;
+	::SendDlgItemMessage(this->hwndDialog, 8101, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
 
 	// reflect flags as checkmarks in the View menu (no-op if dialog has no menu)
 	// reflect flags in the in-window toggle checkboxes
 	::SendDlgItemMessage(this->hwndDialog, 7010, BM_SETCHECK, this->ShowTempHex ? BST_CHECKED : BST_UNCHECKED, 0);
 	::SendDlgItemMessage(this->hwndDialog, 7011, BM_SETCHECK, this->ShowLog ? BST_CHECKED : BST_UNCHECKED, 0);
 	::SendDlgItemMessage(this->hwndDialog, 7012, BM_SETCHECK, this->DarkMode ? BST_CHECKED : BST_UNCHECKED, 0);
+	::SendDlgItemMessage(this->hwndDialog, 7013, BM_SETCHECK, this->m_driversHidden ? BST_CHECKED : BST_UNCHECKED, 0);
 
 	// manual-speed slider: positions 0..7 = fan 0..7, position 8 = 64 (max)
 	HWND hSld = ::GetDlgItem(this->hwndDialog, 8311);
@@ -746,6 +801,162 @@ FANCONTROL::ApplyLogVisibility() {
 }
 
 //-------------------------------------------------------------------------
+//  hide or restore TVic driver files to avoid Riot Vanguard detection
+//-------------------------------------------------------------------------
+void
+FANCONTROL::ToggleGameMode() {
+	static const char* const sys[2] = {
+		"C:\\Windows\\System32\\drivers\\TVicHW64.sys",
+		"C:\\Windows\\System32\\drivers\\TVicPort64.sys"
+	};
+
+	// Disable WOW64 FS redirection: this 32-bit process normally sees SysWOW64 as System32;
+	// driver files live in the real System32\drivers so we must bypass the redirector.
+	typedef BOOL (WINAPI *PFN_Disable)(PVOID*);
+	typedef BOOL (WINAPI *PFN_Revert)(PVOID);
+	HMODULE hK = ::GetModuleHandleA("kernel32.dll");
+	PFN_Disable pfnOff = hK ? (PFN_Disable)::GetProcAddress(hK, "Wow64DisableWow64FsRedirection") : NULL;
+	PFN_Revert  pfnOn  = hK ? (PFN_Revert) ::GetProcAddress(hK, "Wow64RevertWow64FsRedirection")  : NULL;
+	PVOID fsOld = NULL;
+	bool redir = pfnOff && pfnOff(&fsOld);
+
+	DWORD lastErr = 0;
+	bool ok = true;
+	if (!this->m_driversHidden) {
+		// Hide: rename .sys -> .sys.bak, replacing any stale .bak from a prior manual rename
+		for (int i = 0; i < 2; i++) {
+			char bak[MAX_PATH];
+			strcpy_s(bak, sizeof(bak), sys[i]);
+			strcat_s(bak, sizeof(bak), ".bak");
+			if (::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES)
+				if (!::MoveFileExA(sys[i], bak, MOVEFILE_REPLACE_EXISTING))
+					{ lastErr = ::GetLastError(); ok = false; break; }
+		}
+		if (ok) {
+			this->m_driversHidden = true;
+			if (this->pTaskbarIcon && !this->NoBallons)
+				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
+					"Game Mode ON",
+					"TVic drivers hidden — safe to launch Riot games.", 8000);
+		} else {
+			char msg[256];
+			sprintf_s(msg, sizeof(msg),
+				"Could not hide TVic drivers (error %lu).\n\nTPFanControl v2.33 P15G2 Dual must run with administrator privileges for Game Mode.",
+				lastErr);
+			::MessageBoxA(this->hwndDialog, msg, "Game Mode", MB_OK | MB_ICONWARNING);
+		}
+	} else {
+		// Restore: rename .sys.bak -> .sys
+		// If .sys already exists alongside .bak (mixed state), just delete the stale .bak.
+		for (int i = 0; i < 2; i++) {
+			char bak[MAX_PATH];
+			strcpy_s(bak, sizeof(bak), sys[i]);
+			strcat_s(bak, sizeof(bak), ".bak");
+			if (::GetFileAttributesA(bak) != INVALID_FILE_ATTRIBUTES) {
+				if (::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES) {
+					// .sys already present; stale .bak — just remove it
+					::DeleteFileA(bak);
+				} else {
+					if (!::MoveFileExA(bak, sys[i], 0))
+						{ lastErr = ::GetLastError(); ok = false; break; }
+				}
+			}
+		}
+		if (ok) {
+			this->m_driversHidden = false;
+			if (this->pTaskbarIcon && !this->NoBallons)
+				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
+					"Game Mode OFF",
+					"TVic drivers restored. TPFanControl v2.33 P15G2 Dual running normally.", 8000);
+		} else {
+			char msg[256];
+			sprintf_s(msg, sizeof(msg),
+				"Could not restore TVic drivers (error %lu).\n\nCheck C:\\Windows\\System32\\drivers for .sys.bak files.",
+				lastErr);
+			::MessageBoxA(this->hwndDialog, msg, "Game Mode", MB_OK | MB_ICONWARNING);
+		}
+	}
+
+	if (redir) pfnOn(fsOld);
+
+	// Sync the in-dialog checkbox to actual state (handles both click-from-checkbox and tray-menu)
+	::SendDlgItemMessage(this->hwndDialog, 7013, BM_SETCHECK,
+		this->m_driversHidden ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+//-------------------------------------------------------------------------
+//  populate the RichEdit temp list with per-sensor colors
+//-------------------------------------------------------------------------
+void
+FANCONTROL::UpdateTempList() {
+	HWND hRich = ::GetDlgItem(this->hwndDialog, 8101);
+	if (!hRich) return;
+
+	::SendMessage(hRich, WM_SETREDRAW, FALSE, 0);
+	::SetWindowText(hRich, "");
+
+	// Set paragraph tab stops (name col | temp col | hex col)
+	::SendMessage(hRich, EM_SETSEL, 0, -1);
+	PARAFORMAT2 pf = {};
+	pf.cbSize = sizeof(PARAFORMAT2);
+	pf.dwMask = PFM_TABSTOPS;
+	pf.cTabCount = 2;
+	pf.rgxTabs[0] = 840;
+	pf.rgxTabs[1] = 1680;
+	::SendMessage(hRich, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
+
+	char obuf2[128];
+	for (int i = 0; i < 12; i++) {
+		int temp = this->State.Sensors[i];
+		bool valid = (temp != 0 && temp < 128);
+
+		if (!valid && this->ShowAll != 1)
+			continue;
+
+		COLORREF lineColor = this->m_clrText;
+		if (valid) {
+			if (temp >= this->IconLevels[2])      lineColor = RGB(232, 48, 48);
+			else if (temp >= this->IconLevels[1]) lineColor = RGB(232, 120, 0);
+			else if (temp >= this->IconLevels[0]) lineColor = RGB(220, 170, 0);
+			else                                  lineColor = RGB(0, 170, 0);
+		}
+
+		int len = ::GetWindowTextLength(hRich);
+		::SendMessage(hRich, EM_SETSEL, len, len);
+
+		CHARFORMAT cf = {};
+		cf.cbSize = sizeof(CHARFORMAT);
+		cf.dwMask = CFM_COLOR;
+		cf.crTextColor = lineColor;
+		::SendMessage(hRich, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+
+		if (valid) {
+			if (this->Fahrenheit)
+				sprintf_s(obuf2, sizeof(obuf2), "%d\xb0 F", temp * 9 / 5 + 32);
+			else
+				sprintf_s(obuf2, sizeof(obuf2), "%d\xb0 C", temp);
+		} else {
+			strcpy_s(obuf2, sizeof(obuf2), "n/a");
+		}
+
+		char linebuf[128];
+		if (this->ShowTempHex)
+			sprintf_s(linebuf, sizeof(linebuf), "%s\t%s\t(0x%02x)\r\n",
+				this->State.SensorName[i], obuf2, this->State.SensorAddr[i]);
+		else
+			sprintf_s(linebuf, sizeof(linebuf), "%s\t%s\r\n",
+				this->State.SensorName[i], obuf2);
+
+		::SendMessage(hRich, EM_REPLACESEL, FALSE, (LPARAM)linebuf);
+	}
+
+	::SendMessage(hRich, EM_SETSEL, 0, 0);
+	::SendMessage(hRich, EM_SCROLLCARET, 0, 0);
+	::SendMessage(hRich, WM_SETREDRAW, TRUE, 0);
+	::InvalidateRect(hRich, NULL, TRUE);
+}
+
+//-------------------------------------------------------------------------
 //  anchor-based reflow so the window can be resized (fills extra space)
 //-------------------------------------------------------------------------
 void
@@ -753,7 +964,7 @@ FANCONTROL::ReflowLayout() {
 	if (!this->hwndDialog) return;
 
 	// id, then anchor flags: add dW to x/w, dH to y/h
-	static const struct { int id, ax, ay, aw, ah; } A[13] = {
+	static const struct { int id, ax, ay, aw, ah; } A[14] = {
 		{ 9198, 0, 0, 0, 1 },   // Temperatures group: grow height
 		{ 8101, 0, 0, 0, 1 },   // temperature list:   grow height
 		{ 7001, 0, 1, 0, 0 },   // 'all'    radio: follow bottom
@@ -767,6 +978,7 @@ FANCONTROL::ReflowLayout() {
 		{ 7010, 0, 1, 0, 0 },   // Temp hex checkbox: follow bottom
 		{ 7011, 0, 1, 0, 0 },   // Show log checkbox: follow bottom
 		{ 7012, 0, 1, 0, 0 },   // Dark mode checkbox: follow bottom
+		{ 7013, 0, 1, 0, 0 },   // Game mode checkbox: follow bottom
 	};
 
 	RECT rc;
@@ -792,7 +1004,7 @@ FANCONTROL::ReflowLayout() {
 				if (narrow > 200) this->m_minW = narrow;
 			}
 		}
-		for (int i = 0; i < 13; i++) {
+		for (int i = 0; i < 14; i++) {
 			HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 			RECT r = { 0, 0, 0, 0 };
 			if (h) {
@@ -808,8 +1020,8 @@ FANCONTROL::ReflowLayout() {
 	int dW = cw - this->m_baseCW;
 	int dH = ch - this->m_baseCH;
 
-	HDWP hdwp = ::BeginDeferWindowPos(13);
-	for (int i = 0; i < 13; i++) {
+	HDWP hdwp = ::BeginDeferWindowPos(14);
+	for (int i = 0; i < 14; i++) {
 		HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 		if (!h) continue;
 		const RECT& b = this->m_baseRC[i];
@@ -1180,20 +1392,19 @@ FANCONTROL::DlgProc(HWND
 		int cid = ::GetDlgCtrlID((HWND)mp2);
 		COLORREF txt = this->m_clrText;   // theme default (dark/light aware)
 
-		if (cid == 8103) {
-			// "Switch" temperature: fixed thresholds per request
-			int t = this->MaxTemp;
-			if (t >= 90)      txt = RGB(232, 48, 48);   // red   (90s)
-			else if (t >= 70) txt = RGB(220, 170, 0);   // yellow(70-89)
-			else              txt = RGB(0, 170, 0);     // green (<70)
-		}
-		else if (cid == 8100 || cid == 8112 || cid == 8113) {
-			// other status/state readouts: severity from IconLevels
+		if (cid == 8100 || cid == 8103) {
+			// state and switch temp: severity from IconLevels
 			int t = this->MaxTemp;
 			if (t >= this->IconLevels[2])      txt = RGB(232, 48, 48);
 			else if (t >= this->IconLevels[1]) txt = RGB(232, 120, 0);
 			else if (t >= this->IconLevels[0]) txt = RGB(220, 170, 0);
 			else                               txt = RGB(0, 170, 0);
+		}
+		else if (cid == 8115) {
+			// TPControlFAN indicator: green when fan control is active (Smart/Manual)
+			if (this->CurrentMode == 2 || this->CurrentMode == 3)
+				txt = RGB(0, 170, 0);
+			// else: default m_clrText (black/white per theme)
 		}
 
 		::SetTextColor(hdc, txt);
@@ -1239,8 +1450,12 @@ FANCONTROL::DlgProc(HWND
 
 			if (this->pTaskbarIcon)
 			{
-				this->pTaskbarIcon->SetTooltip(this->Title2);
-				strcpy_s(this->LastTooltip, sizeof(this->LastTooltip), this->Title2);
+				char tip[128];
+				strcpy_s(tip, sizeof(tip), this->Title2);
+				if (this->m_driversHidden)
+					strcat_s(tip, sizeof(tip), " [GAME]");
+				this->pTaskbarIcon->SetTooltip(tip);
+				strcpy_s(this->LastTooltip, sizeof(this->LastTooltip), tip);
 				int icon = -1;
 
 				if (this->CurrentModeFromDialog() == 1)
@@ -1266,7 +1481,7 @@ FANCONTROL::DlgProc(HWND
 					this->pTaskbarIcon->SetIcon(icon);
 					this->CurrentIcon = icon;
 					if (dioicon && !this->NoBallons) {
-						this->pTaskbarIcon->SetBalloon(NIIF_INFO, "TPFanControl old symbol icon",
+						this->pTaskbarIcon->SetBalloon(NIIF_INFO, "TPFanControl v2.33 P15G2 Dual symbol icon",
 							"shows temperature level by color and state in tooltip, left click on icon shows or hides control window, right click shows menue",
 							11);
 						dioicon = FALSE;
@@ -1391,58 +1606,12 @@ FANCONTROL::DlgProc(HWND
 
 			//display temperature list
 
-			char obuf[256] = "", obuf2[128] = "", templist2[512];
-
-			strcpy_s(templist2, sizeof(templist2), "");
-
 			if (cmd == 7001 || cmd == 7002)
 			{
 				this->ShowAllFromDialog();
-
-				int i;
-				for (i = 0;	i < 12; i++)
-				{
-					int temp = this->State.Sensors[i];
-
-					if (temp < 128 && temp != 0)
-					{
-						if (Fahrenheit)
-							sprintf_s(obuf2, sizeof(obuf2), "%d° F", temp * 9 / 5 + 32);
-						else
-							sprintf_s(obuf2, sizeof(obuf2), "%d° C", temp);
-
-						size_t strlen_templist2 = strlen_s(templist2, sizeof(templist2));
-
-						if (this->ShowTempHex)
-							sprintf_s(templist2	+ strlen_templist2, sizeof(templist2) - strlen_templist2,
-								"%s\t%s\t(0x%02x)", this->State.SensorName[i], obuf2, this->State.SensorAddr[i]);
-						else
-							sprintf_s(templist2	+ strlen_templist2, sizeof(templist2) - strlen_templist2,
-								"%s\t%s", this->State.SensorName[i], obuf2);
-
-						strcat_s(templist2, sizeof(templist2), "\r\n");
-					}
-					else
-					{
-						if (this->ShowAll == 1)
-						{
-							sprintf_s(obuf2, sizeof(obuf2), "n/a");
-								size_t strlen_templist2 = strlen_s(templist2, sizeof(templist2));
-
-							if (this->ShowTempHex)
-								sprintf_s(templist2	+ strlen_templist2, sizeof(templist2) - strlen_templist2,
-									"%s\t%s\t(0x%02x)", this->State.SensorName[i], obuf2, this->State.SensorAddr[i]);
-							else
-								sprintf_s(templist2	+ strlen_templist2, sizeof(templist2) - strlen_templist2,
-									"%s\t%s", this->State.SensorName[i], obuf2);
-
-							strcat_s(templist2, sizeof(templist2), "\r\n");
-						}
-					}
-				}
-				::SetDlgItemText(this->hwndDialog, 8101, templist2);
-				this->icontemp = this->State.Sensors[iMaxTemp];
-			};
+				this->UpdateTempList();
+				this->icontemp = this->State.Sensors[this->iMaxTemp];
+			}
 			//end temp display
 
 			if (cmd >= 8300 && cmd <= 8302 || cmd == 8310) {  // radio button or manual speed entry
@@ -1463,6 +1632,10 @@ FANCONTROL::DlgProc(HWND
 				case 7012: // Dark mode checkbox
 					this->DarkMode = (::SendDlgItemMessage(this->hwndDialog, 7012, BM_GETCHECK, 0, 0) == BST_CHECKED);
 					this->ApplyTheme();
+					break;
+
+				case 7013: // Game mode checkbox
+					this->ToggleGameMode();
 					break;
 
 				case 5001: // bios
@@ -1535,7 +1708,7 @@ FANCONTROL::DlgProc(HWND
 
 				case 5070: // show temp icon
 					this->ShowTempIcon = 0;
-					this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl");
+					this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.33 P15G2 Dual");
 					this->pTaskbarIcon->SetIcon(this->CurrentIcon);
 					break;
 
@@ -1547,6 +1720,10 @@ FANCONTROL::DlgProc(HWND
 
 				case 5030: // hide window
 					::ShowWindow(this->hwndDialog, SW_MINIMIZE);
+					break;
+
+				case 5090: // game mode toggle
+					this->ToggleGameMode();
 					break;
 
 				case 5020: // end program
@@ -1624,6 +1801,12 @@ FANCONTROL::DlgProc(HWND
 	case WM_ENDSESSION:  //WM_QUERYENDSESSION?
 	//if running as service do not end
 		if (!this->Runs_as_service) {
+			// mp1 (wParam) == TRUE means Windows is actually shutting down.
+			// After this handler returns the process can be killed, so restore
+			// drivers here rather than relying on the destructor path.
+			if (mp1 && this->m_driversHidden)
+				this->ToggleGameMode();
+
 			// end program
 			// Wait for the work thread to terminate
 			if (this->hThread) {
@@ -1842,6 +2025,9 @@ FANCONTROL::DlgProc(HWND
 			if (IsWindowVisible(this->hwndDialog))
 				m.DeleteMenuItem(5010);
 
+			if (this->m_driversHidden)
+				m.CheckMenuItem(5090);
+
 			if (this->ShowTempIcon == 0)
 				m.DeleteMenuItem(5070);
 
@@ -1956,12 +2142,12 @@ void FANCONTROL::ProcessTextIcons(void) {
 				if (Fahrenheit) {
 					ppTbTextIcon[0]->DiShowballon(
 						_T("shows max. temperature in ° F and sensor name, left click on icon shows or hides control window, right click shows menue"),
-						_T("TPFanControl new text icon"), NIIF_INFO, 11);
+						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11);
 				}
 				else {
 					ppTbTextIcon[0]->DiShowballon(
 						_T("shows max. temperature in ° C and sensor name, left click on icon shows or hides control window, right click shows menue"),
-						_T("TPFanControl new text icon"), NIIF_INFO, 11);
+						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11);
 				}
 
 				// Input:
