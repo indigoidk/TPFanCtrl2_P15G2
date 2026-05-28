@@ -478,7 +478,7 @@ BOOL
 FANCONTROL::SetHdw(const char* source, int hdwctrl, int HdwOffset, int AnyWayBit) {
 	int ok = 0;
 	char obuf[256] = "", obuf2[256], datebuf[128];
-	unsigned char newhdwctrl;
+	unsigned char newhdwctrl = 0;   // guard: ReadByteFromEC leaves *pdata untouched on failure
 
 	if (!this->LockECAccess()) return false;
 
