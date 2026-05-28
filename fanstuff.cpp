@@ -401,7 +401,10 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 	if (this->ActiveMode && !this->FinalSeen) {
 		if (!this->LockECAccess()) return false;
 
-		for (int i = 0; i < 5; i++) {
+		// Verify-and-retry: keep the 100ms settle waits (the EC needs them for a
+		// correct read-back) but cap retries/backoff so a failing EC can't freeze
+		// the UI thread for ~3.5s. Worst case now ~1.5s.
+		for (int i = 0; i < 3; i++) {
 			// set new fan level
 			ok = this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
 			ok = this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
@@ -431,7 +434,7 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 				break;
 			}
 
-			::Sleep(300);
+			if (i < 2) ::Sleep(150);   // brief backoff before retry (skipped after last attempt)
 		}
 
 		this->FreeECAccess();
@@ -484,7 +487,7 @@ FANCONTROL::SetHdw(const char* source, int hdwctrl, int HdwOffset, int AnyWayBit
 
 	this->CurrentDateTimeLocalized(datebuf, sizeof(datebuf));
 
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 3; i++) {   // capped retries/backoff (see SetFan)
 		ok = this->ReadByteFromEC(HdwOffset, &newhdwctrl);
 		if (newhdwctrl & hdwctrl) {
 			ok = this->WriteByteToEC(HdwOffset, (newhdwctrl - hdwctrl) | AnyWayBit);
@@ -500,7 +503,7 @@ FANCONTROL::SetHdw(const char* source, int hdwctrl, int HdwOffset, int AnyWayBit
 		if (hdwctrl == newhdwctrl)
 			break;
 
-		::Sleep(300);
+		if (i < 2) ::Sleep(150);
 	}
 
 	sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "%s: Set EC register 0x%02x to %d, ", source, HdwOffset, hdwctrl);
