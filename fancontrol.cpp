@@ -598,7 +598,12 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 //-------------------------------------------------------------------------
 FANCONTROL::~FANCONTROL() {
 	if (this->m_driversHidden)
-		this->ToggleGameMode();   // restore TVic drivers on clean exit
+		this->ToggleGameMode(true);   // restore TVic drivers on clean exit (no UI)
+
+	if (this->m_hwndTip) {
+		::DestroyWindow(this->m_hwndTip);
+		this->m_hwndTip = NULL;
+	}
 
 	if (this->hThread) {
 		::WaitForSingleObject(this->hThread, 2000);
@@ -804,7 +809,7 @@ FANCONTROL::ApplyLogVisibility() {
 //  hide or restore TVic driver files to avoid Riot Vanguard detection
 //-------------------------------------------------------------------------
 void
-FANCONTROL::ToggleGameMode() {
+FANCONTROL::ToggleGameMode(bool silent) {
 	static const char* const sys[2] = {
 		"C:\\Windows\\System32\\drivers\\TVicHW64.sys",
 		"C:\\Windows\\System32\\drivers\\TVicPort64.sys"
@@ -834,11 +839,11 @@ FANCONTROL::ToggleGameMode() {
 		}
 		if (ok) {
 			this->m_driversHidden = true;
-			if (this->pTaskbarIcon && !this->NoBallons)
+			if (!silent && this->pTaskbarIcon && !this->NoBallons)
 				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
 					"Game Mode ON",
 					"TVic drivers hidden — safe to launch Riot games.", 8000);
-		} else {
+		} else if (!silent) {
 			char msg[256];
 			sprintf_s(msg, sizeof(msg),
 				"Could not hide TVic drivers (error %lu).\n\nTPFanControl v2.33 P15G2 Dual must run with administrator privileges for Game Mode.",
@@ -864,11 +869,11 @@ FANCONTROL::ToggleGameMode() {
 		}
 		if (ok) {
 			this->m_driversHidden = false;
-			if (this->pTaskbarIcon && !this->NoBallons)
+			if (!silent && this->pTaskbarIcon && !this->NoBallons)
 				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
 					"Game Mode OFF",
 					"TVic drivers restored. TPFanControl v2.33 P15G2 Dual running normally.", 8000);
-		} else {
+		} else if (!silent) {
 			char msg[256];
 			sprintf_s(msg, sizeof(msg),
 				"Could not restore TVic drivers (error %lu).\n\nCheck C:\\Windows\\System32\\drivers for .sys.bak files.",
@@ -1805,7 +1810,7 @@ FANCONTROL::DlgProc(HWND
 			// After this handler returns the process can be killed, so restore
 			// drivers here rather than relying on the destructor path.
 			if (mp1 && this->m_driversHidden)
-				this->ToggleGameMode();
+				this->ToggleGameMode(true);   // silent: no modal dialog can stall shutdown
 
 			// end program
 			// Wait for the work thread to terminate

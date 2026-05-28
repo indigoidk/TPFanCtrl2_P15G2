@@ -26,7 +26,7 @@
 #include "winstuff.h"
 #include "TaskbarTextIcon.h"
 
-#define FANCONTROLVERSION "2.4 Dual Fan"
+#define FANCONTROLVERSION "2.33 P15G2 Dual"
 
 #define WM__DISMISSDLG WM_USER+5
 #define WM__GETDATA WM_USER+6
@@ -50,6 +50,7 @@ protected:
 	HINSTANCE hinstapp;
 	HINSTANCE m_hinstapp;
 	HWND hwndDialog;
+	HWND m_hwndTip = NULL;
 
 	UINT_PTR m_fanTimer;
 	UINT_PTR m_titleTimer;
@@ -179,11 +180,15 @@ protected:
 	BOOL m_layoutInit;   // base geometry captured yet?
 	int  m_baseCW, m_baseCH;   // design-time client size
 	int  m_minW, m_minH;       // minimum window size (= design size)
-	RECT m_baseRC[13];   // design-time control rects (client coords)
+	RECT m_baseRC[14];   // design-time control rects (client coords)
 	void ReflowLayout();       // re-anchor controls on WM_SIZE
 	void ApplyTheme();   // (re)build theme brushes + dark titlebar + repaint
 	void InitThemeAndChrome();   // post-create: tab stops, menu checks, slider, theme
 	void ApplyLogVisibility();   // show/hide Log + shrink/restore window width
+	void UpdateTempList();   // repopulate RichEdit 8101 with per-sensor colors
+	void ToggleGameMode(bool silent = false);   // hide/restore TVic driver files; silent on exit/shutdown
+
+	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
 
 	char Title[128];
 	char Title2[128];

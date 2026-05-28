@@ -264,6 +264,7 @@ void WorkerThread(void *dummy) {
 		SetHardAccess(NewHardAccess);
 		HardAccess = TestHardAccess();
 
+		LoadLibraryA("riched20.dll");  // register RichEdit20A class for temp list
 		FANCONTROL fc(hInstApp);
 
         g_dialogWnd = fc.GetDialogWnd();

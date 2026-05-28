@@ -34,8 +34,7 @@
 int
 FANCONTROL::HandleData(void) {
 	char obuf[256] = "", obuf2[128] = "",
-		templist[256] = "", templist2[512],
-		manlevel[16] = "", title2[128] = "";
+		templist[256] = "", manlevel[16] = "", title2[128] = "";
 	int i, maxtemp, imaxtemp, ok = 0;
 
 	//
@@ -152,41 +151,7 @@ FANCONTROL::HandleData(void) {
 
 	::SetDlgItemText(this->hwndDialog, 8103, obuf2);
 
-	strcpy_s(templist2, sizeof(templist2), "");
-
-	for (i = 0; i < 12; i++) {
-		int temp = this->State.Sensors[i];
-
-		if (temp != 0 && temp < 128) {
-			if (Fahrenheit)
-				sprintf_s(obuf2, sizeof(obuf2), "%d° F", temp * 9 / 5 + 32);
-			else
-				sprintf_s(obuf2, sizeof(obuf2), "%d° C", temp);
-
-			if (this->ShowTempHex)
-				sprintf_s(templist2 + strlen(templist2), sizeof(templist2) - strlen(templist2), "%s\t%s\t(0x%02x)", this->State.SensorName[i], obuf2, this->State.SensorAddr[i]);
-			else
-				sprintf_s(templist2 + strlen(templist2), sizeof(templist2) - strlen(templist2), "%s\t%s", this->State.SensorName[i], obuf2);
-
-			strcat_s(templist2, sizeof(templist2), "\r\n");
-		}
-		else {
-			if (this->ShowAll == 1) {
-				sprintf_s(obuf2, sizeof(obuf2), "n/a");
-
-				size_t strlen_templist = strlen_s(templist2, sizeof(templist2));
-
-				if (this->ShowTempHex)
-					sprintf_s(templist2 + strlen_templist, sizeof(templist2) - strlen_templist, "%s\t%s\t(0x%02x)", this->State.SensorName[i], obuf2, this->State.SensorAddr[i]);
-				else
-					sprintf_s(templist2 + strlen_templist, sizeof(templist2) - strlen_templist, "%s\t%s", this->State.SensorName[i], obuf2);
-
-				strcat_s(templist2, sizeof(templist2), "\r\n");
-			}
-		}
-	}
-
-	::SetDlgItemText(this->hwndDialog, 8101, templist2);
+	this->UpdateTempList();
 
 	this->icontemp = this->State.Sensors[iMaxTemp];
 
@@ -242,6 +207,9 @@ FANCONTROL::HandleData(void) {
 
 	this->CurrentModeFromDialog();
 	this->ShowAllFromDialog();
+
+	::SetDlgItemText(this->hwndDialog, 8115,
+		(this->CurrentMode == 2 || this->CurrentMode == 3) ? "TPControlFAN = On" : "TPControlFAN = OFF");
 
 	switch (this->CurrentMode) {
 
