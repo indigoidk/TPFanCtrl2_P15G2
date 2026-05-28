@@ -1,0 +1,11 @@
+# Build output
+[Dd]ebug/
+[Rr]elease/
+
+# Visual Studio working files
+.vs/
+*.VC.db
+*.vcxproj.user
+
+# Local Claude Code session data
+.claude/
