@@ -189,6 +189,7 @@ protected:
 	void ToggleGameMode(bool silent = false);   // hide/restore TVic driver files; silent on exit/shutdown
 
 	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
+	char m_tempListSig[1024] = "";   // cache: skip RichEdit rebuild when nothing visible changed
 
 	char Title[128];
 	char Title2[128];

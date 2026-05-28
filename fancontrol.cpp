@@ -897,20 +897,16 @@ FANCONTROL::UpdateTempList() {
 	HWND hRich = ::GetDlgItem(this->hwndDialog, 8101);
 	if (!hRich) return;
 
-	::SendMessage(hRich, WM_SETREDRAW, FALSE, 0);
-	::SetWindowText(hRich, "");
+	// Build every visible row plus a signature of everything that affects the
+	// rendering. This runs each poll cycle, so bail out before touching the
+	// RichEdit when nothing visible has changed since the last render.
+	struct { COLORREF color; char line[128]; } rows[12];
+	int nrows = 0;
+	char sig[1024];
+	int siglen = sprintf_s(sig, sizeof(sig), "%lu|%d|%d|%d|",
+		(unsigned long)this->m_clrText, this->ShowTempHex ? 1 : 0,
+		this->Fahrenheit ? 1 : 0, this->ShowAll);
 
-	// Set paragraph tab stops (name col | temp col | hex col)
-	::SendMessage(hRich, EM_SETSEL, 0, -1);
-	PARAFORMAT2 pf = {};
-	pf.cbSize = sizeof(PARAFORMAT2);
-	pf.dwMask = PFM_TABSTOPS;
-	pf.cTabCount = 2;
-	pf.rgxTabs[0] = 840;
-	pf.rgxTabs[1] = 1680;
-	::SendMessage(hRich, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
-
-	char obuf2[128];
 	for (int i = 0; i < 12; i++) {
 		int temp = this->State.Sensors[i];
 		bool valid = (temp != 0 && temp < 128);
@@ -926,15 +922,7 @@ FANCONTROL::UpdateTempList() {
 			else                                  lineColor = RGB(0, 170, 0);
 		}
 
-		int len = ::GetWindowTextLength(hRich);
-		::SendMessage(hRich, EM_SETSEL, len, len);
-
-		CHARFORMAT cf = {};
-		cf.cbSize = sizeof(CHARFORMAT);
-		cf.dwMask = CFM_COLOR;
-		cf.crTextColor = lineColor;
-		::SendMessage(hRich, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
-
+		char obuf2[64];
 		if (valid) {
 			if (this->Fahrenheit)
 				sprintf_s(obuf2, sizeof(obuf2), "%d\xb0 F", temp * 9 / 5 + 32);
@@ -944,15 +932,47 @@ FANCONTROL::UpdateTempList() {
 			strcpy_s(obuf2, sizeof(obuf2), "n/a");
 		}
 
-		char linebuf[128];
+		rows[nrows].color = lineColor;
 		if (this->ShowTempHex)
-			sprintf_s(linebuf, sizeof(linebuf), "%s\t%s\t(0x%02x)\r\n",
+			sprintf_s(rows[nrows].line, sizeof(rows[nrows].line), "%s\t%s\t(0x%02x)\r\n",
 				this->State.SensorName[i], obuf2, this->State.SensorAddr[i]);
 		else
-			sprintf_s(linebuf, sizeof(linebuf), "%s\t%s\r\n",
+			sprintf_s(rows[nrows].line, sizeof(rows[nrows].line), "%s\t%s\r\n",
 				this->State.SensorName[i], obuf2);
 
-		::SendMessage(hRich, EM_REPLACESEL, FALSE, (LPARAM)linebuf);
+		siglen += sprintf_s(sig + siglen, sizeof(sig) - siglen, "%lu:%s",
+			(unsigned long)lineColor, rows[nrows].line);
+		nrows++;
+	}
+
+	if (strcmp(sig, this->m_tempListSig) == 0)
+		return;   // identical to last render — leave the control untouched
+	strcpy_s(this->m_tempListSig, sizeof(this->m_tempListSig), sig);
+
+	::SendMessage(hRich, WM_SETREDRAW, FALSE, 0);
+	::SetWindowText(hRich, "");
+
+	// Set paragraph tab stops (name col | temp col | hex col)
+	::SendMessage(hRich, EM_SETSEL, 0, -1);
+	PARAFORMAT2 pf = {};
+	pf.cbSize = sizeof(PARAFORMAT2);
+	pf.dwMask = PFM_TABSTOPS;
+	pf.cTabCount = 2;
+	pf.rgxTabs[0] = 840;
+	pf.rgxTabs[1] = 1680;
+	::SendMessage(hRich, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
+
+	for (int r = 0; r < nrows; r++) {
+		int len = ::GetWindowTextLength(hRich);
+		::SendMessage(hRich, EM_SETSEL, len, len);
+
+		CHARFORMAT cf = {};
+		cf.cbSize = sizeof(CHARFORMAT);
+		cf.dwMask = CFM_COLOR;
+		cf.crTextColor = rows[r].color;
+		::SendMessage(hRich, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+
+		::SendMessage(hRich, EM_REPLACESEL, FALSE, (LPARAM)rows[r].line);
 	}
 
 	::SendMessage(hRich, EM_SETSEL, 0, 0);
