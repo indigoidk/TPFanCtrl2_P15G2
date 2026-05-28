@@ -1750,7 +1750,7 @@ FANCONTROL::DlgProc(HWND
 						::KillTimer(this->hwndDialog, m_titleTimer);
 						::KillTimer(this->hwndDialog, m_iconTimer);
 						::KillTimer(this->hwndDialog, m_renewTimer);
-						BOOL CloHT = CloseHandle(this->hThread);
+						BOOL CloHT = CloseHandle(this->hThread); this->hThread = NULL;  // avoid stale/double-close in dtor & WM__NEWDATA
 						// BOOL CloHM=CloseHandle(this->hLock);
 						// BOOL CloHS=CloseHandle(this->hLockS);
 						this->Trace("Exiting ProcessDialog");
@@ -1831,7 +1831,7 @@ FANCONTROL::DlgProc(HWND
 				::KillTimer(this->hwndDialog, m_titleTimer);
 				::KillTimer(this->hwndDialog, m_iconTimer);
 				::KillTimer(this->hwndDialog, m_renewTimer);
-				BOOL CloHT = CloseHandle(this->hThread);
+				BOOL CloHT = CloseHandle(this->hThread); this->hThread = NULL;  // avoid stale/double-close in dtor & WM__NEWDATA
 				// BOOL CloHM=CloseHandle(this->hLock);
 				// BOOL CloHS=CloseHandle(this->hLockS);
 				this->Trace("Exiting ProcessDialog");
