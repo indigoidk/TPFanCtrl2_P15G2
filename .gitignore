@@ -9,3 +9,6 @@
 
 # Local Claude Code session data
 .claude/
+
+# Resource compiler temp files
+res/RC[a-z][0-9]*
