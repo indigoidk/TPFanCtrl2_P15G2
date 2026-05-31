@@ -1,0 +1,29 @@
+name: build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release | Win32)
+        run: msbuild fancontrol.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32
+
+      - name: Upload TPFanControl.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: TPFanControl-Release-Win32
+          path: Release/TPFanControl.exe
+          if-no-files-found: error

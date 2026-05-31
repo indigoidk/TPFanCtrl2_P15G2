@@ -15,3 +15,9 @@ res/RC[a-z][0-9]*
 
 # Claude Code session memory
 memory/
+
+# Visual Studio C++ build-tools upgrade scratch
+.github/upgrades/
+
+# Legacy VS2008 project file (use fancontrol.vcxproj)
+fancontrol.vcproj
