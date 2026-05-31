@@ -187,6 +187,8 @@ protected:
 	void ApplyLogVisibility();   // show/hide Log + shrink/restore window width
 	void UpdateTempList();   // repopulate RichEdit 8101 with per-sensor colors
 	void ToggleGameMode(bool silent = false);   // hide/restore TVic driver files; silent on exit/shutdown
+	void ShowSettingsDialog();   // modal in-app settings editor (writes TPFanControl.ini)
+	static INT_PTR CALLBACK SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 
 	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
 	char m_tempListSig[1024] = "";   // cache: skip RichEdit rebuild when nothing visible changed
@@ -260,6 +262,8 @@ protected:
 	int previousModeBeforeLidClose = -1;
 	// misc.cpp
 	int ReadConfig(const char* filename);
+
+	void SaveConfig(const char* filename);   // rewrite known keys in-place, preserving comments
 
 	void Trace(const char* text);
 

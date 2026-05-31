@@ -1751,6 +1751,10 @@ FANCONTROL::DlgProc(HWND
 					this->ToggleGameMode();
 					break;
 
+				case 5100: // settings dialog
+					this->ShowSettingsDialog();
+					break;
+
 				case 5020: // end program
 				// Wait for the work thread to terminate
 					if (this->hThread) {
@@ -2094,6 +2098,146 @@ static const int MAX_TEXT_ICONS = 16;
 int icon, oldicon;
 BOOL dishow(TRUE);
 TCHAR myszTip[64];
+
+//-------------------------------------------------------------------------
+//  modal Settings dialog (resource 9300)
+//-------------------------------------------------------------------------
+INT_PTR CALLBACK
+FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+	FANCONTROL* self = (FANCONTROL*)::GetWindowLongPtr(hwnd, DWLP_USER);
+
+	switch (msg) {
+	case WM_INITDIALOG:
+		self = (FANCONTROL*)lp;
+		::SetWindowLongPtr(hwnd, DWLP_USER, (LONG_PTR)self);
+
+		::CheckDlgButton(hwnd, 9301, self->StartMinimized ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9302, self->StayOnTop      ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9303, self->ShowTempIcon   ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9304, self->ShowTempHex    ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9305, self->ShowLog        ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9306, self->DarkMode       ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9307, self->NoBallons      ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9308, self->Log2File       ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9309, self->Log2csv        ? BST_CHECKED : BST_UNCHECKED);
+		::SetDlgItemInt(hwnd, 9310, self->Cycle, FALSE);
+
+		// match the main window's dark titlebar (loaded dynamically; no link dep)
+		if (self->DarkMode) {
+			HMODULE hDwm = ::LoadLibraryA("dwmapi.dll");
+			if (hDwm) {
+				typedef HRESULT(WINAPI * PFN_SWA)(HWND, DWORD, LPCVOID, DWORD);
+				PFN_SWA p = (PFN_SWA)::GetProcAddress(hDwm, "DwmSetWindowAttribute");
+				BOOL on = TRUE;
+				if (p) p(hwnd, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &on, sizeof(on));
+				::FreeLibrary(hDwm);
+			}
+		}
+		return TRUE;
+
+	case WM_CTLCOLORDLG:
+		if (self) return (INT_PTR)self->m_hbrDlg;
+		break;
+
+	case WM_CTLCOLORSTATIC:
+	case WM_CTLCOLORBTN:
+		if (self) {
+			::SetTextColor((HDC)wp, self->m_clrText);
+			::SetBkMode((HDC)wp, TRANSPARENT);
+			return (INT_PTR)self->m_hbrDlg;
+		}
+		break;
+
+	case WM_CTLCOLOREDIT:
+		if (self) {
+			::SetTextColor((HDC)wp, self->m_clrText);
+			::SetBkMode((HDC)wp, TRANSPARENT);
+			return (INT_PTR)self->m_hbrField;
+		}
+		break;
+
+	case WM_COMMAND:
+		switch (LOWORD(wp)) {
+		case IDOK:
+			if (self) {
+				int oldDark  = self->DarkMode;
+				int oldLog   = self->ShowLog;
+				int oldTop   = self->StayOnTop;
+				int oldIcon  = self->ShowTempIcon;
+				int oldCycle = self->Cycle;
+
+				self->StartMinimized = (::IsDlgButtonChecked(hwnd, 9301) == BST_CHECKED);
+				self->StayOnTop      = (::IsDlgButtonChecked(hwnd, 9302) == BST_CHECKED);
+				self->ShowTempIcon   = (::IsDlgButtonChecked(hwnd, 9303) == BST_CHECKED);
+				self->ShowTempHex    = (::IsDlgButtonChecked(hwnd, 9304) == BST_CHECKED);
+				self->ShowLog        = (::IsDlgButtonChecked(hwnd, 9305) == BST_CHECKED);
+				self->DarkMode       = (::IsDlgButtonChecked(hwnd, 9306) == BST_CHECKED);
+				self->NoBallons      = (::IsDlgButtonChecked(hwnd, 9307) == BST_CHECKED);
+				self->Log2File       = (::IsDlgButtonChecked(hwnd, 9308) == BST_CHECKED);
+				self->Log2csv        = (::IsDlgButtonChecked(hwnd, 9309) == BST_CHECKED);
+				{
+					BOOL ok = FALSE;
+					int c = (int)::GetDlgItemInt(hwnd, 9310, &ok, FALSE);
+					if (ok && c >= 1 && c <= 600) self->Cycle = c;
+				}
+
+				self->SaveConfig("TPFanControl.ini");
+
+				HWND main = self->hwndDialog;
+
+				// keep the in-window checkboxes in sync with the new state
+				::SendDlgItemMessage(main, 7010, BM_SETCHECK, self->ShowTempHex ? BST_CHECKED : BST_UNCHECKED, 0);
+				::SendDlgItemMessage(main, 7011, BM_SETCHECK, self->ShowLog     ? BST_CHECKED : BST_UNCHECKED, 0);
+				::SendDlgItemMessage(main, 7012, BM_SETCHECK, self->DarkMode    ? BST_CHECKED : BST_UNCHECKED, 0);
+
+				// live-apply the cheap changes
+				if (self->DarkMode != oldDark) self->ApplyTheme();
+				if (self->ShowLog != oldLog)   self->ApplyLogVisibility();
+				if (self->StayOnTop != oldTop)
+					::SetWindowPos(main, self->StayOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+						0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+				if (self->Cycle != oldCycle) {
+					::KillTimer(main, 1);
+					self->m_fanTimer = ::SetTimer(main, 1, 1000 * self->Cycle, NULL);
+				}
+				if (self->ShowTempIcon != oldIcon) {
+					if (self->ShowTempIcon == 0) {
+						// classic colored symbol icon
+						if (!self->pTaskbarIcon) {
+							self->pTaskbarIcon = new TASKBARICON(main, 10, "TPFanControl");
+							self->pTaskbarIcon->SetIcon(self->CurrentIcon);
+						}
+					}
+					else {
+						// text temperature icon (recreated by the icon timer)
+						if (self->pTaskbarIcon) {
+							delete self->pTaskbarIcon;
+							self->pTaskbarIcon = NULL;
+						}
+					}
+				}
+
+				// refresh temps/list so the hex column and icon repaint immediately
+				::PostMessage(main, WM__GETDATA, 0, 0);
+			}
+			::EndDialog(hwnd, IDOK);
+			return TRUE;
+
+		case IDCANCEL:
+			::EndDialog(hwnd, IDCANCEL);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+void FANCONTROL::ShowSettingsDialog()
+{
+	::DialogBoxParam(this->hinstapp, MAKEINTRESOURCE(9300),
+		this->hwndDialog, (DLGPROC)FANCONTROL::SettingsDlgProc, (LPARAM)this);
+}
 
 void FANCONTROL::ProcessTextIcons(void) {
 	oldicon = icon;

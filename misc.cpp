@@ -21,6 +21,100 @@
 
 
 //-------------------------------------------------------------------------
+//  write selected options back to the ini, preserving comments and order
+//-------------------------------------------------------------------------
+void
+FANCONTROL::SaveConfig(const char* configfile)
+{
+	struct KV { const char* key; int val; };
+	KV items[] = {
+		{ "StartMinimized", this->StartMinimized },
+		{ "StayOnTop",      this->StayOnTop },
+		{ "ShowTempIcon",   this->ShowTempIcon },
+		{ "ShowTempHex",    this->ShowTempHex },
+		{ "ShowLog",        this->ShowLog },
+		{ "DarkMode",       this->DarkMode },
+		{ "NoBallons",      this->NoBallons },
+		{ "Log2File",       this->Log2File },
+		{ "Log2csv",        this->Log2csv },
+		{ "Cycle",          this->Cycle },
+	};
+	const int N = (int)(sizeof(items) / sizeof(items[0]));
+	bool done[16] = { false };
+
+	FILE* fin = NULL;
+	if (fopen_s(&fin, configfile, "r") != 0 || !fin) {
+		this->Trace("SaveConfig: cannot open ini for reading");
+		return;
+	}
+
+	char tmpname[MAX_PATH];
+	sprintf_s(tmpname, sizeof(tmpname), "%s.tmp", configfile);
+	FILE* fout = NULL;
+	if (fopen_s(&fout, tmpname, "w") != 0 || !fout) {
+		fclose(fin);
+		this->Trace("SaveConfig: cannot open temp file for writing");
+		return;
+	}
+
+	char buf[1024];
+	while (fgets(buf, sizeof(buf), fin)) {
+		// match the key token at the start of the line (after any leading blanks)
+		char* s = buf;
+		while (*s == ' ' || *s == '\t') s++;
+
+		int matched = -1;
+		for (int i = 0; i < N; i++) {
+			size_t klen = strlen(items[i].key);
+			if (_strnicmp(s, items[i].key, klen) == 0 && s[klen] == '=') {
+				matched = i;
+				break;
+			}
+		}
+
+		if (matched >= 0 && !done[matched]) {
+			// preserve any inline "// ..." comment that followed the old value
+			char* cmt = strstr(buf, "//");
+			if (cmt) {
+				char c[1024];
+				strcpy_s(c, sizeof(c), cmt);
+				char* nl = strpbrk(c, "\r\n");
+				if (nl) *nl = 0;
+				fprintf(fout, "%s=%d %s\r\n", items[matched].key, items[matched].val, c);
+			}
+			else {
+				fprintf(fout, "%s=%d\r\n", items[matched].key, items[matched].val);
+			}
+			done[matched] = true;
+		}
+		else {
+			fputs(buf, fout);
+		}
+	}
+
+	// append any keys that were not present in the original file
+	for (int i = 0; i < N; i++) {
+		if (!done[i])
+			fprintf(fout, "%s=%d\r\n", items[i].key, items[i].val);
+	}
+
+	fclose(fin);
+	fclose(fout);
+
+	// replace the original with the rewritten copy
+	if (remove(configfile) == 0) {
+		if (rename(tmpname, configfile) != 0)
+			this->Trace("SaveConfig: rename of temp ini failed");
+		else
+			this->Trace("Settings saved to TPFanControl.ini");
+	}
+	else {
+		this->Trace("SaveConfig: could not replace ini");
+		remove(tmpname);
+	}
+}
+
+//-------------------------------------------------------------------------
 //  read config file
 //-------------------------------------------------------------------------
 int
