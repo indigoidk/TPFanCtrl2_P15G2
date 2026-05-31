@@ -3,7 +3,7 @@
 #include <string.h>
 
 
-CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarbeIconA, const int iFontIconA) {
+CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarbeIconA, const int iFontIconA, int iconSize) {
     //3 chars per line
     char _line1[4], _line2[4];
     strncpy_s(_line1, sizeof(_line1), line1, 3);
@@ -11,6 +11,13 @@ CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarb
     _line1[3] = 0;
     _line2[3] = 0;
 
+    // pick a DPI-appropriate size; fall back to the classic 16x16 if anything is odd
+    if (iconSize <= 0)
+        iconSize = ::GetSystemMetrics(SM_CXSMICON);
+    if (iconSize < 16)
+        iconSize = 16;
+    iconWidth_ = iconSize;
+    iconHeight_ = iconSize;
 
     //TODO: implement errorhandling
 
@@ -79,7 +86,7 @@ CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarb
 
     HFONT hfnt, hOldFont;
 
-    hfnt = this->CreateFont(memDC1_);
+    hfnt = this->CreateFont(memDC1_, iconWidth_);
 
     if (hOldFont = (HFONT) SelectObject(memDC1_, hfnt)) {
         //SetBkColor(memDC1_,RGB(255,0,0));
@@ -87,17 +94,18 @@ CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarb
         //TODO: Textcolors
         //default textcolor: RGB(32,16,176)
 
+        // rects were tuned for 16x16; scale proportionally for HiDPI sizes
         RECT r;
-        r.top = -2; //org -1
+        r.top = MulDiv(-2, iconHeight_, 16); //org -1
         r.left = 0;
-        r.bottom = 9; //org 10
-        r.right = 15;
+        r.bottom = MulDiv(9, iconHeight_, 16); //org 10
+        r.right = iconWidth_;
         DrawTextEx(memDC1_, (LPSTR) _line1, strlen(_line1), &r, DT_CENTER, NULL);
 
-        r.top = 5;  //org 6 neu ?
+        r.top = MulDiv(5, iconHeight_, 16);  //org 6 neu ?
         r.left = 0;
-        r.bottom = 16; // org 15
-        r.right = 15;
+        r.bottom = MulDiv(16, iconHeight_, 16); // org 15
+        r.right = iconWidth_;
         DrawTextEx(memDC1_, (LPSTR) _line2, strlen(_line2), &r, DT_CENTER, NULL);
 
         SelectObject(memDC1_, hOldFont);
@@ -128,7 +136,7 @@ HICON CDynamicIcon::GetHIcon() {
     return icon_;
 }
 
-HFONT CDynamicIcon::CreateFont(const HDC hDC) {
+HFONT CDynamicIcon::CreateFont(const HDC hDC, int size) {
     LOGFONT lf;
 
 //#define DEV_FIND_FONT
@@ -154,13 +162,23 @@ HFONT CDynamicIcon::CreateFont(const HDC hDC) {
 
     SecureZeroMemory(&lf, sizeof(LOGFONT));
     // int iitest = GetDeviceCaps(hDC, LOGPIXELSY);
-    lf.lfHeight = -9; //-MulDiv(6, GetDeviceCaps(hDC, LOGPIXELSY), 64); // 64 neu
+    // base height -9 was tuned for 16px; scale it for the actual icon size
+    lf.lfHeight = MulDiv(-9, size, 16); //-MulDiv(6, GetDeviceCaps(hDC, LOGPIXELSY), 64); // 64 neu
     lf.lfWeight = 400;
     lf.lfOutPrecision = 1;
     lf.lfClipPrecision = 2;
-    lf.lfQuality = 1;
-    lf.lfPitchAndFamily = 34;
-    strcpy_s(lf.lfFaceName, sizeof(lf.lfFaceName), "Small Fonts");
+    // "Small Fonts" is a bitmap face that only looks right near 16px; at larger
+    // (HiDPI) sizes switch to a scalable, antialiased TrueType face.
+    if (size > 16) {
+        lf.lfQuality = ANTIALIASED_QUALITY;
+        lf.lfPitchAndFamily = 0;
+        strcpy_s(lf.lfFaceName, sizeof(lf.lfFaceName), "Tahoma");
+    }
+    else {
+        lf.lfQuality = 1;
+        lf.lfPitchAndFamily = 34;
+        strcpy_s(lf.lfFaceName, sizeof(lf.lfFaceName), "Small Fonts");
+    }
 
     return CreateFontIndirect(&lf);
 };

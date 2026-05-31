@@ -17,7 +17,7 @@ class CTaskbarTextIcon
 		void _createdicon(const int iFarbeIconC, LPCTSTR aTooltipC, const int iFontIconC) 
 			{	
 			if(m_pSystray) m_pSystray->SetTooltipText(aTooltipC);
-			CDynamicIcon* pDiconTemp = new CDynamicIcon(m_line1, m_line2, iFarbeIconC, iFontIconC);
+			CDynamicIcon* pDiconTemp = new CDynamicIcon(m_line1, m_line2, iFarbeIconC, iFontIconC, m_iconSize);
 			if(m_pSystray) m_pSystray->SetIcon(pDiconTemp->GetHIcon());
 			if(m_pDicon)delete m_pDicon;
 			m_pDicon = pDiconTemp;
@@ -59,6 +59,7 @@ class CTaskbarTextIcon
 		//TODO: implement set/get/use
 		COLORREF m_TextColor, m_BgColor;
 		bool m_BgTransparent;
+		int m_iconSize;   // DPI-scaled tray icon size (SM_CXSMICON)
 
 		void _setlines(const char* line1,const char* line2) 
 		{
@@ -87,7 +88,8 @@ class CTaskbarTextIcon
         m_pDicon(NULL),
         m_TextColor(RGB(0,0,0)),
         m_BgColor(RGB(255,0,0)),
-        m_BgTransparent(false)        
+        m_BgTransparent(false),
+        m_iconSize(::GetSystemMetrics(SM_CXSMICON))
 			{
 			_setlines(line1,line2);
 			_createdicon(iFarbeIconC, aTooltipC, iFontIconC);

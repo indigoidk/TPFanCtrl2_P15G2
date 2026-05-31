@@ -152,7 +152,8 @@ TASKBARICON::Construct() {
 
 	if (this->IconId) {
 		nof.hIcon = (HICON)
-			::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+			::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON,
+				::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
 		nof.uFlags |= NIF_ICON;
 	}
 
@@ -235,7 +236,8 @@ TASKBARICON::SetIcon(int iconid) {
 	nof.uID = this->Id;
 	nof.uFlags = NIF_ICON;
 	nof.hIcon = (HICON)
-		::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+		::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON,
+			::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
 
 	ok = ::Shell_NotifyIcon(NIM_MODIFY, &nof);
 
