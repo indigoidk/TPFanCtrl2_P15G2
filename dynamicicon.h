@@ -26,7 +26,7 @@ private:
 	int iconHeight_;
 
 private:
-	__inline static HFONT CreateFont(const HDC hDC, int size);
+	__inline static HFONT CreateFont(const HDC hDC, int size, bool big = false);
 	//default und copy verbergen
 	__inline CDynamicIcon() {};
 	__inline CDynamicIcon(const CDynamicIcon&) {};

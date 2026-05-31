@@ -46,16 +46,16 @@ CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarb
             hBrush = CreateSolidBrush(RGB(245, 245, 245)); //grau
             break;
         case 11:
-            hBrush = CreateSolidBrush(RGB(191, 239, 255)); //blau
+            hBrush = CreateSolidBrush(RGB(0, 170, 0)); //green  (in-app: below level0)
             break;
         case 12:
-            hBrush = CreateSolidBrush(RGB(255, 255, 0)); //gelb
+            hBrush = CreateSolidBrush(RGB(220, 170, 0)); //amber (in-app: >= level0)
             break;
         case 13:
-            hBrush = CreateSolidBrush(RGB(255, 165, 0)); //orange
+            hBrush = CreateSolidBrush(RGB(232, 120, 0)); //orange (in-app: >= level1)
             break;
         case 14:
-            hBrush = CreateSolidBrush(RGB(255, 69, 0)); //rot
+            hBrush = CreateSolidBrush(RGB(232, 48, 48)); //red   (in-app: >= level2)
             break;
         case 21:
             hBrush = CreateSolidBrush(RGB(175, 255, 175)); //sehr hell grün
@@ -86,7 +86,12 @@ CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarb
 
     HFONT hfnt, hOldFont;
 
-    hfnt = this->CreateFont(memDC1_, iconWidth_);
+    // single value (no sensor-name line) -> center it bigger; 3 digits (e.g. degF)
+    // stay at the normal size so they still fit the tiny icon.
+    bool oneLine = (_line2[0] == 0);
+    bool bigFont = oneLine && (strlen(_line1) <= 2);
+
+    hfnt = this->CreateFont(memDC1_, iconWidth_, bigFont);
 
     if (hOldFont = (HFONT) SelectObject(memDC1_, hfnt)) {
         //SetBkColor(memDC1_,RGB(255,0,0));
@@ -94,19 +99,31 @@ CDynamicIcon::CDynamicIcon(const char *line1, const char *line2, const int iFarb
         //TODO: Textcolors
         //default textcolor: RGB(32,16,176)
 
-        // rects were tuned for 16x16; scale proportionally for HiDPI sizes
-        RECT r;
-        r.top = MulDiv(-2, iconHeight_, 16); //org -1
-        r.left = 0;
-        r.bottom = MulDiv(9, iconHeight_, 16); //org 10
-        r.right = iconWidth_;
-        DrawTextEx(memDC1_, (LPSTR) _line1, strlen(_line1), &r, DT_CENTER, NULL);
+        if (oneLine) {
+            // center the temperature over the whole icon
+            RECT r;
+            r.left = 0;
+            r.top = 0;
+            r.right = iconWidth_;
+            r.bottom = iconHeight_;
+            DrawTextEx(memDC1_, (LPSTR) _line1, strlen(_line1), &r,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE, NULL);
+        }
+        else {
+            // rects were tuned for 16x16; scale proportionally for HiDPI sizes
+            RECT r;
+            r.top = MulDiv(-2, iconHeight_, 16); //org -1
+            r.left = 0;
+            r.bottom = MulDiv(9, iconHeight_, 16); //org 10
+            r.right = iconWidth_;
+            DrawTextEx(memDC1_, (LPSTR) _line1, strlen(_line1), &r, DT_CENTER, NULL);
 
-        r.top = MulDiv(5, iconHeight_, 16);  //org 6 neu ?
-        r.left = 0;
-        r.bottom = MulDiv(16, iconHeight_, 16); // org 15
-        r.right = iconWidth_;
-        DrawTextEx(memDC1_, (LPSTR) _line2, strlen(_line2), &r, DT_CENTER, NULL);
+            r.top = MulDiv(5, iconHeight_, 16);  //org 6 neu ?
+            r.left = 0;
+            r.bottom = MulDiv(16, iconHeight_, 16); // org 15
+            r.right = iconWidth_;
+            DrawTextEx(memDC1_, (LPSTR) _line2, strlen(_line2), &r, DT_CENTER, NULL);
+        }
 
         SelectObject(memDC1_, hOldFont);
     }
@@ -136,7 +153,7 @@ HICON CDynamicIcon::GetHIcon() {
     return icon_;
 }
 
-HFONT CDynamicIcon::CreateFont(const HDC hDC, int size) {
+HFONT CDynamicIcon::CreateFont(const HDC hDC, int size, bool big) {
     LOGFONT lf;
 
 //#define DEV_FIND_FONT
@@ -163,7 +180,7 @@ HFONT CDynamicIcon::CreateFont(const HDC hDC, int size) {
     SecureZeroMemory(&lf, sizeof(LOGFONT));
     // int iitest = GetDeviceCaps(hDC, LOGPIXELSY);
     // base height -9 was tuned for 16px; scale it for the actual icon size
-    lf.lfHeight = MulDiv(-9, size, 16); //-MulDiv(6, GetDeviceCaps(hDC, LOGPIXELSY), 64); // 64 neu
+    lf.lfHeight = MulDiv(big ? -12 : -9, size, 16); //-MulDiv(6, GetDeviceCaps(hDC, LOGPIXELSY), 64); // 64 neu
     lf.lfWeight = 400;
     lf.lfOutPrecision = 1;
     lf.lfClipPrecision = 2;

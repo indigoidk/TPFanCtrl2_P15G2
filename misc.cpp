@@ -38,9 +38,18 @@ FANCONTROL::SaveConfig(const char* configfile)
 		{ "Log2File",       this->Log2File },
 		{ "Log2csv",        this->Log2csv },
 		{ "Cycle",          this->Cycle },
+		{ "ShowGraph",      this->ShowGraph },
 	};
 	const int N = (int)(sizeof(items) / sizeof(items[0]));
 	bool done[16] = { false };
+	bool doneIcon = false;   // IconLevels is a 3-int line, handled separately
+
+	// IconLevels are stored internally in Celsius; write them back in the user's
+	// display unit so a Fahrenheit ini round-trips correctly
+	int icA = this->IconLevels[0], icB = this->IconLevels[1], icC = this->IconLevels[2];
+	if (this->Fahrenheit) {
+		icA = icA * 9 / 5 + 32; icB = icB * 9 / 5 + 32; icC = icC * 9 / 5 + 32;
+	}
 
 	FILE* fin = NULL;
 	if (fopen_s(&fin, configfile, "r") != 0 || !fin) {
@@ -62,6 +71,23 @@ FANCONTROL::SaveConfig(const char* configfile)
 		// match the key token at the start of the line (after any leading blanks)
 		char* s = buf;
 		while (*s == ' ' || *s == '\t') s++;
+
+		// IconLevels: multi-value line not covered by the scalar table above
+		if (!doneIcon && _strnicmp(s, "IconLevels=", 11) == 0) {
+			char* cmt = strstr(buf, "//");
+			if (cmt) {
+				char c[1024];
+				strcpy_s(c, sizeof(c), cmt);
+				char* nl = strpbrk(c, "\r\n");
+				if (nl) *nl = 0;
+				fprintf(fout, "IconLevels=%d %d %d %s\r\n", icA, icB, icC, c);
+			}
+			else {
+				fprintf(fout, "IconLevels=%d %d %d\r\n", icA, icB, icC);
+			}
+			doneIcon = true;
+			continue;
+		}
 
 		int matched = -1;
 		for (int i = 0; i < N; i++) {
@@ -97,6 +123,8 @@ FANCONTROL::SaveConfig(const char* configfile)
 		if (!done[i])
 			fprintf(fout, "%s=%d\r\n", items[i].key, items[i].val);
 	}
+	if (!doneIcon)
+		fprintf(fout, "IconLevels=%d %d %d\r\n", icA, icB, icC);
 
 	fclose(fin);
 	fclose(fout);
@@ -427,6 +455,11 @@ FANCONTROL::ReadConfig(const char* configfile)
 				continue;
 			}
 
+			if (_strnicmp(buf, "ShowGraph=", 10) == 0) {
+				this->ShowGraph = atoi(buf + 10);
+				continue;
+			}
+
 			if (_strnicmp(buf, "SensorName1=", 12) == 0) {
 				strncpy_s(this->gSensorNames[0], sizeof(this->gSensorNames[0]), buf + 12, 3);
 				continue;
@@ -661,6 +694,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"ShowTempHex=0\r\n"
 				"ShowLog=1\r\n"
 				"DarkMode=0\r\n"
+				"ShowGraph=1\r\n"
 				"\r\n"
 				"# Switch back to BIOS after this many consecutive read errors\r\n"
 				"MaxReadErrors=10\r\n"

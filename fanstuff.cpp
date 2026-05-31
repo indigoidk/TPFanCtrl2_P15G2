@@ -79,6 +79,13 @@ FANCONTROL::HandleData(void) {
 	this->MaxTemp = maxtemp;
 	this->iMaxTemp = imaxtemp;
 
+	// record this reading and refresh the history sparkline (owner-draw static 8120)
+	this->PushTempSample(this->MaxTemp);
+	{
+		HWND hSpark = ::GetDlgItem(this->hwndDialog, 8120);
+		if (hSpark) ::InvalidateRect(hSpark, NULL, FALSE);
+	}
+
 	//
 	// update dialog elements
 	//

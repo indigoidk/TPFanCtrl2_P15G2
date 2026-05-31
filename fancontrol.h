@@ -161,6 +161,7 @@ protected:
 	int ShowTempHex;   // show (0x..) EC address column in temp list
 	int ShowLog;       // show the Log box
 	int DarkMode;      // dark theme
+	int ShowGraph;     // show the temperature history sparkline (control 8120)
 	char IgnoreSensors[256];
 	char MenuLabelSM1[32];
 	char MenuLabelSM2[32];
@@ -180,8 +181,16 @@ protected:
 	BOOL m_layoutInit;   // base geometry captured yet?
 	int  m_baseCW, m_baseCH;   // design-time client size
 	int  m_minW, m_minH;       // minimum window size (= design size)
-	RECT m_baseRC[14];   // design-time control rects (client coords)
+	RECT m_baseRC[16];   // design-time control rects (client coords)
 	void ReflowLayout();       // re-anchor controls on WM_SIZE
+
+	// rolling history of MaxTemp for the in-dialog sparkline (owner-draw static 8120)
+	static const int TEMPHIST_MAX = 120;   // samples kept (~10 min at Cycle=5s)
+	unsigned char m_tempHist[TEMPHIST_MAX];
+	int m_tempHistCount;       // valid samples (saturates at TEMPHIST_MAX)
+	int m_tempHistHead;        // index of next write (ring buffer)
+	void PushTempSample(int temp);          // record one MaxTemp reading
+	void DrawSparkline(HDC hdc, const RECT& rc);   // paint the history graph
 	void ApplyTheme();   // (re)build theme brushes + dark titlebar + repaint
 	void InitThemeAndChrome();   // post-create: tab stops, menu checks, slider, theme
 	void ApplyLogVisibility();   // show/hide Log + shrink/restore window width
@@ -189,6 +198,7 @@ protected:
 	void ToggleGameMode(bool silent = false);   // hide/restore TVic driver files; silent on exit/shutdown
 	void ShowSettingsDialog();   // modal in-app settings editor (writes TPFanControl.ini)
 	static INT_PTR CALLBACK SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+	void ApplySettingsFromDialog(HWND hwnd);   // shared by OK and Apply in the Settings dialog
 
 	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
 	char m_tempListSig[1024] = "";   // cache: skip RichEdit rebuild when nothing visible changed

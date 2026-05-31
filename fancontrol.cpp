@@ -105,6 +105,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	this->ShowTempHex = 0;
 	this->ShowLog = 0;
 	this->DarkMode = 1;
+	this->ShowGraph = 1;
 	// Detect if TVic drivers were left hidden (e.g., after a previous crash in game mode).
 	// Require both files to be absent/backed-up; a partial state leaves m_driversHidden false.
 	// Disable WOW64 FS redirection: this is a 32-bit process; without this, System32 maps to
@@ -130,6 +131,9 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	this->m_fullW = 0;
 	this->m_layoutInit = FALSE;
 	this->m_baseCW = this->m_baseCH = this->m_minW = this->m_minH = 0;
+	this->m_tempHistCount = 0;
+	this->m_tempHistHead = 0;
+	memset(this->m_tempHist, 0, sizeof(this->m_tempHist));
 	this->ApplyTheme();   // create initial brushes (window themed after it exists)
 
 	// SensorNames
@@ -655,6 +659,73 @@ static BOOL CALLBACK ThemeChildProc(HWND hChild, LPARAM lp) {
 }
 
 //-------------------------------------------------------------------------
+//  like ThemeChildProc but also darkens push buttons (the main window has
+//  none; the Settings dialog has OK/Apply/Cancel)
+//-------------------------------------------------------------------------
+static BOOL CALLBACK ThemeDlgChildProc(HWND hChild, LPARAM lp) {
+	THEMECTX* c = (THEMECTX*)lp;
+	if (c->pSet) {
+		char cls[32] = "";
+		::GetClassNameA(hChild, cls, sizeof(cls));
+		if (!c->dark)
+			c->pSet(hChild, NULL, NULL);                       // restore default theme
+		else if (_stricmp(cls, "Edit") == 0)
+			c->pSet(hChild, L"DarkMode_Explorer", NULL);       // dark edit + scrollbars
+		else if (_stricmp(cls, "Button") == 0) {
+			LONG bt = ::GetWindowLong(hChild, GWL_STYLE) & 0x0F;   // BS_TYPEMASK
+			if (bt == BS_PUSHBUTTON || bt == BS_DEFPUSHBUTTON)
+				c->pSet(hChild, L"DarkMode_Explorer", NULL);   // dark push buttons
+			else
+				c->pSet(hChild, L"", L"");                     // check/radio/group -> WM_CTLCOLOR
+		}
+		else
+			c->pSet(hChild, L"", L"");                         // statics -> WM_CTLCOLOR
+	}
+	::InvalidateRect(hChild, NULL, TRUE);
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------
+//  apply dark/light chrome (titlebar + child controls) to an arbitrary dialog
+//-------------------------------------------------------------------------
+static void ApplyDarkToDialog(HWND hwnd, BOOL dark) {
+	if (!hwnd) return;
+
+	HMODULE hDwm = ::LoadLibraryA("dwmapi.dll");
+	if (hDwm) {
+		typedef HRESULT(WINAPI* PFNDWMSWA)(HWND, DWORD, LPCVOID, DWORD);
+		PFNDWMSWA pSet = (PFNDWMSWA)::GetProcAddress(hDwm, "DwmSetWindowAttribute");
+		if (pSet) {
+			BOOL d = dark ? TRUE : FALSE;
+			if (FAILED(pSet(hwnd, 20, &d, sizeof(d))))   // DWMWA_USE_IMMERSIVE_DARK_MODE
+				pSet(hwnd, 19, &d, sizeof(d));           // 19 on older Win10 builds
+		}
+		::FreeLibrary(hDwm);
+	}
+
+	HMODULE hUx = ::LoadLibraryA("uxtheme.dll");
+	if (hUx) {
+		typedef int  (WINAPI* fnSPAM)(int);          // SetPreferredAppMode (ord 135)
+		typedef bool (WINAPI* fnADMW)(HWND, bool);   // AllowDarkModeForWindow (ord 133)
+		typedef void (WINAPI* fnFMT)();              // FlushMenuThemes (ord 136)
+		fnSPAM pSPAM = (fnSPAM)::GetProcAddress(hUx, MAKEINTRESOURCEA(135));
+		fnADMW pADMW = (fnADMW)::GetProcAddress(hUx, MAKEINTRESOURCEA(133));
+		fnFMT  pFMT  = (fnFMT) ::GetProcAddress(hUx, MAKEINTRESOURCEA(136));
+		if (pSPAM) pSPAM(dark ? 2 : 3);
+		if (pADMW) pADMW(hwnd, dark ? true : false);
+		if (pFMT)  pFMT();
+
+		THEMECTX ctx;
+		ctx.pSet = (PFNSWTHEME)::GetProcAddress(hUx, "SetWindowTheme");
+		ctx.dark = dark;
+		::EnumChildWindows(hwnd, ThemeDlgChildProc, (LPARAM)&ctx);
+		::FreeLibrary(hUx);
+	}
+
+	::InvalidateRect(hwnd, NULL, TRUE);
+}
+
+//-------------------------------------------------------------------------
 //  (re)build theme brushes, apply dark title bar, repaint
 //-------------------------------------------------------------------------
 void
@@ -770,6 +841,13 @@ FANCONTROL::InitThemeAndChrome() {
 
 	this->ReflowLayout();      // capture design geometry before any resize
 	this->ApplyLogVisibility();
+
+	// initial visibility of the temperature history graph
+	{
+		int sw = this->ShowGraph ? SW_SHOW : SW_HIDE;
+		::ShowWindow(::GetDlgItem(this->hwndDialog, 9202), sw);
+		::ShowWindow(::GetDlgItem(this->hwndDialog, 8120), sw);
+	}
 
 	this->ApplyTheme();
 }
@@ -989,7 +1067,7 @@ FANCONTROL::ReflowLayout() {
 	if (!this->hwndDialog) return;
 
 	// id, then anchor flags: add dW to x/w, dH to y/h
-	static const struct { int id, ax, ay, aw, ah; } A[14] = {
+	static const struct { int id, ax, ay, aw, ah; } A[16] = {
 		{ 9198, 0, 0, 0, 1 },   // Temperatures group: grow height
 		{ 8101, 0, 0, 0, 1 },   // temperature list:   grow height
 		{ 7001, 0, 1, 0, 0 },   // 'all'    radio: follow bottom
@@ -1004,6 +1082,8 @@ FANCONTROL::ReflowLayout() {
 		{ 7011, 0, 1, 0, 0 },   // Show log checkbox: follow bottom
 		{ 7012, 0, 1, 0, 0 },   // Dark mode checkbox: follow bottom
 		{ 7013, 0, 1, 0, 0 },   // Game mode checkbox: follow bottom
+		{ 9202, 0, 1, 1, 0 },   // Temp history group: follow bottom, grow width
+		{ 8120, 0, 1, 1, 0 },   // sparkline:          follow bottom, grow width
 	};
 
 	RECT rc;
@@ -1029,7 +1109,7 @@ FANCONTROL::ReflowLayout() {
 				if (narrow > 200) this->m_minW = narrow;
 			}
 		}
-		for (int i = 0; i < 14; i++) {
+		for (int i = 0; i < 16; i++) {
 			HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 			RECT r = { 0, 0, 0, 0 };
 			if (h) {
@@ -1045,8 +1125,8 @@ FANCONTROL::ReflowLayout() {
 	int dW = cw - this->m_baseCW;
 	int dH = ch - this->m_baseCH;
 
-	HDWP hdwp = ::BeginDeferWindowPos(14);
-	for (int i = 0; i < 14; i++) {
+	HDWP hdwp = ::BeginDeferWindowPos(16);
+	for (int i = 0; i < 16; i++) {
 		HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 		if (!h) continue;
 		const RECT& b = this->m_baseRC[i];
@@ -1063,6 +1143,123 @@ FANCONTROL::ReflowLayout() {
 	if (hdwp) ::EndDeferWindowPos(hdwp);
 
 	::InvalidateRect(this->hwndDialog, NULL, TRUE);
+}
+
+//-------------------------------------------------------------------------
+//  push one MaxTemp reading into the rolling history ring buffer
+//-------------------------------------------------------------------------
+void
+FANCONTROL::PushTempSample(int temp) {
+	if (temp < 0)   temp = 0;
+	if (temp > 255) temp = 255;
+	this->m_tempHist[this->m_tempHistHead] = (unsigned char)temp;
+	this->m_tempHistHead = (this->m_tempHistHead + 1) % TEMPHIST_MAX;
+	if (this->m_tempHistCount < TEMPHIST_MAX)
+		this->m_tempHistCount++;
+}
+
+//-------------------------------------------------------------------------
+//  paint the temperature history as an autoscaled sparkline (owner-draw)
+//-------------------------------------------------------------------------
+void
+FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
+	// background: match the editable-field color, fall back to the dialog color
+	HBRUSH bg = this->m_hbrField ? this->m_hbrField : this->m_hbrDlg;
+	if (bg) ::FillRect(hdc, &rc, bg);
+
+	const int w = rc.right - rc.left;
+	const int h = rc.bottom - rc.top;
+	const int n = this->m_tempHistCount;
+	const int head = this->m_tempHistHead;
+
+	::SetBkMode(hdc, TRANSPARENT);
+
+	if (n <= 0 || w < 4 || h < 4) {
+		::SetTextColor(hdc, this->m_clrText);
+		RECT tr = rc; tr.left += 4;
+		::DrawTextA(hdc, "collecting...", -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+		return;
+	}
+
+	// data range over the window, with a sane minimum span for readability
+	int lo = 255, hi = 0;
+	long sum = 0;
+	for (int i = 0; i < n; i++) {
+		int v = this->m_tempHist[(head - n + i + TEMPHIST_MAX) % TEMPHIST_MAX];
+		if (v < lo) lo = v;
+		if (v > hi) hi = v;
+		sum += v;
+	}
+	int avg = (int)(sum / n);
+	if (hi - lo < 10) { int mid = (hi + lo) / 2; lo = mid - 5; hi = mid + 5; }
+	if (lo < 0) { hi -= lo; lo = 0; }
+	if (hi <= lo) hi = lo + 1;   // guard divide-by-zero
+
+	// severity color from the latest sample (same thresholds as the temp list/icon)
+	int latest = this->m_tempHist[(head - 1 + TEMPHIST_MAX) % TEMPHIST_MAX];
+	COLORREF lineClr;
+	if      (latest >= this->IconLevels[2]) lineClr = RGB(232, 48, 48);
+	else if (latest >= this->IconLevels[1]) lineClr = RGB(232, 120, 0);
+	else if (latest >= this->IconLevels[0]) lineClr = RGB(220, 170, 0);
+	else                                    lineClr = RGB(0, 170, 0);
+
+	const int top = rc.top + 1, bot = rc.bottom - 2;   // 1px padding top/bottom
+	const int ploth = bot - top;
+
+	// faint gridlines at each IconLevel threshold that falls inside the range
+	COLORREF gridClr = this->DarkMode ? RGB(70, 70, 74) : RGB(210, 210, 210);
+	HPEN gridPen = ::CreatePen(PS_SOLID, 1, gridClr);
+	HPEN oldPen = (HPEN)::SelectObject(hdc, gridPen);
+	for (int g = 0; g < 3; g++) {
+		int lvl = this->IconLevels[g];
+		if (lvl <= lo || lvl >= hi) continue;
+		int y = bot - ploth * (lvl - lo) / (hi - lo);
+		::MoveToEx(hdc, rc.left, y, NULL);
+		::LineTo(hdc, rc.right, y);
+	}
+	::SelectObject(hdc, oldPen);
+	::DeleteObject(gridPen);
+
+	// the temperature trace
+	HPEN linePen = ::CreatePen(PS_SOLID, 1, lineClr);
+	oldPen = (HPEN)::SelectObject(hdc, linePen);
+	for (int i = 0; i < n; i++) {
+		int v = this->m_tempHist[(head - n + i + TEMPHIST_MAX) % TEMPHIST_MAX];
+		int x = rc.left + (n == 1 ? 0 : (w - 1) * i / (n - 1));
+		int y = bot - ploth * (v - lo) / (hi - lo);
+		if (i == 0) ::MoveToEx(hdc, x, y, NULL);
+		else        ::LineTo(hdc, x, y);
+	}
+	::SelectObject(hdc, oldPen);
+	::DeleteObject(linePen);
+
+	// current value + range labels
+	char lbl[48];
+	if (this->Fahrenheit)
+		sprintf_s(lbl, sizeof(lbl), "%d\xb0 F", latest * 9 / 5 + 32);
+	else
+		sprintf_s(lbl, sizeof(lbl), "%d\xb0 C", latest);
+	::SetTextColor(hdc, lineClr);
+	RECT lr = rc; lr.left += 4;
+	::DrawTextA(hdc, lbl, -1, &lr, DT_SINGLELINE | DT_TOP | DT_LEFT);
+
+	char rng[48];
+	if (this->Fahrenheit)
+		sprintf_s(rng, sizeof(rng), "%d-%d\xb0 F", lo * 9 / 5 + 32, hi * 9 / 5 + 32);
+	else
+		sprintf_s(rng, sizeof(rng), "%d-%d\xb0 C", lo, hi);
+	::SetTextColor(hdc, this->m_clrText);
+	RECT rr = rc; rr.right -= 4;
+	::DrawTextA(hdc, rng, -1, &rr, DT_SINGLELINE | DT_TOP | DT_RIGHT);
+
+	// window average, centered at the top (min/max are the range label above)
+	char avgl[48];
+	if (this->Fahrenheit)
+		sprintf_s(avgl, sizeof(avgl), "avg %d\xb0", avg * 9 / 5 + 32);
+	else
+		sprintf_s(avgl, sizeof(avgl), "avg %d\xb0", avg);
+	RECT ar = rc;
+	::DrawTextA(hdc, avgl, -1, &ar, DT_SINGLELINE | DT_TOP | DT_CENTER);
 }
 
 //-------------------------------------------------------------------------
@@ -1350,6 +1547,11 @@ FANCONTROL::DlgProc(HWND
 	case WM_DRAWITEM:
 	{
 		DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)mp2;
+		if (dis && dis->CtlType == ODT_STATIC && dis->CtlID == 8120) {
+			this->DrawSparkline(dis->hDC, dis->rcItem);
+			rc = TRUE;
+			break;
+		}
 		if (dis && dis->CtlType == ODT_MENU) {
 			const char* txt =
 				dis->itemID == 7010 ? "Temp hex" :
@@ -1404,6 +1606,34 @@ FANCONTROL::DlgProc(HWND
 			::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 		}
 		break;
+
+	case WM_CONTEXTMENU:
+	{
+		// right-click on the history sparkline -> offer to clear it
+		HWND hSpark = ::GetDlgItem(this->hwndDialog, 8120);
+		POINT pt = { (short)LOWORD(mp2), (short)HIWORD(mp2) };
+		RECT wr;
+		if (hSpark && ::GetWindowRect(hSpark, &wr)) {
+			if (pt.x == -1 && pt.y == -1) {   // invoked via keyboard
+				pt.x = (wr.left + wr.right) / 2;
+				pt.y = (wr.top + wr.bottom) / 2;
+			}
+			if (::PtInRect(&wr, pt)) {
+				HMENU hm = ::CreatePopupMenu();
+				::AppendMenuA(hm, MF_STRING, 1, "Clear history");
+				int sel = ::TrackPopupMenu(hm, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+					pt.x, pt.y, 0, this->hwndDialog, NULL);
+				::DestroyMenu(hm);
+				if (sel == 1) {
+					this->m_tempHistCount = 0;
+					this->m_tempHistHead = 0;
+					::InvalidateRect(hSpark, NULL, TRUE);
+				}
+				rc = TRUE;
+			}
+		}
+		break;
+	}
 
 	case WM_CTLCOLORDLG:
 		rc = (ULONG)(LONG_PTR)this->m_hbrDlg;
@@ -2121,19 +2351,23 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		::CheckDlgButton(hwnd, 9307, self->NoBallons      ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9308, self->Log2File       ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9309, self->Log2csv        ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9314, self->ShowGraph      ? BST_CHECKED : BST_UNCHECKED);
 		::SetDlgItemInt(hwnd, 9310, self->Cycle, FALSE);
 
-		// match the main window's dark titlebar (loaded dynamically; no link dep)
-		if (self->DarkMode) {
-			HMODULE hDwm = ::LoadLibraryA("dwmapi.dll");
-			if (hDwm) {
-				typedef HRESULT(WINAPI * PFN_SWA)(HWND, DWORD, LPCVOID, DWORD);
-				PFN_SWA p = (PFN_SWA)::GetProcAddress(hDwm, "DwmSetWindowAttribute");
-				BOOL on = TRUE;
-				if (p) p(hwnd, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &on, sizeof(on));
-				::FreeLibrary(hDwm);
-			}
+		// icon color thresholds, shown in the user's current display unit
+		{
+			int t0 = self->IconLevels[0], t1 = self->IconLevels[1], t2 = self->IconLevels[2];
+			if (self->Fahrenheit) { t0 = t0 * 9 / 5 + 32; t1 = t1 * 9 / 5 + 32; t2 = t2 * 9 / 5 + 32; }
+			::SetDlgItemInt(hwnd, 9311, t0, FALSE);
+			::SetDlgItemInt(hwnd, 9312, t1, FALSE);
+			::SetDlgItemInt(hwnd, 9313, t2, FALSE);
+			::SetDlgItemTextA(hwnd, 9319, self->Fahrenheit
+				? "warm / hot / critical (\xb0" "F)" : "warm / hot / critical (\xb0" "C)");
 		}
+
+		// match the main window's full dark theme (titlebar + child controls so
+		// checkbox/label text is white in dark mode, not theme-drawn black)
+		ApplyDarkToDialog(hwnd, self->DarkMode);
 		return TRUE;
 
 	case WM_CTLCOLORDLG:
@@ -2160,68 +2394,16 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	case WM_COMMAND:
 		switch (LOWORD(wp)) {
 		case IDOK:
-			if (self) {
-				int oldDark  = self->DarkMode;
-				int oldLog   = self->ShowLog;
-				int oldTop   = self->StayOnTop;
-				int oldIcon  = self->ShowTempIcon;
-				int oldCycle = self->Cycle;
-
-				self->StartMinimized = (::IsDlgButtonChecked(hwnd, 9301) == BST_CHECKED);
-				self->StayOnTop      = (::IsDlgButtonChecked(hwnd, 9302) == BST_CHECKED);
-				self->ShowTempIcon   = (::IsDlgButtonChecked(hwnd, 9303) == BST_CHECKED);
-				self->ShowTempHex    = (::IsDlgButtonChecked(hwnd, 9304) == BST_CHECKED);
-				self->ShowLog        = (::IsDlgButtonChecked(hwnd, 9305) == BST_CHECKED);
-				self->DarkMode       = (::IsDlgButtonChecked(hwnd, 9306) == BST_CHECKED);
-				self->NoBallons      = (::IsDlgButtonChecked(hwnd, 9307) == BST_CHECKED);
-				self->Log2File       = (::IsDlgButtonChecked(hwnd, 9308) == BST_CHECKED);
-				self->Log2csv        = (::IsDlgButtonChecked(hwnd, 9309) == BST_CHECKED);
-				{
-					BOOL ok = FALSE;
-					int c = (int)::GetDlgItemInt(hwnd, 9310, &ok, FALSE);
-					if (ok && c >= 1 && c <= 600) self->Cycle = c;
-				}
-
-				self->SaveConfig("TPFanControl.ini");
-
-				HWND main = self->hwndDialog;
-
-				// keep the in-window checkboxes in sync with the new state
-				::SendDlgItemMessage(main, 7010, BM_SETCHECK, self->ShowTempHex ? BST_CHECKED : BST_UNCHECKED, 0);
-				::SendDlgItemMessage(main, 7011, BM_SETCHECK, self->ShowLog     ? BST_CHECKED : BST_UNCHECKED, 0);
-				::SendDlgItemMessage(main, 7012, BM_SETCHECK, self->DarkMode    ? BST_CHECKED : BST_UNCHECKED, 0);
-
-				// live-apply the cheap changes
-				if (self->DarkMode != oldDark) self->ApplyTheme();
-				if (self->ShowLog != oldLog)   self->ApplyLogVisibility();
-				if (self->StayOnTop != oldTop)
-					::SetWindowPos(main, self->StayOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
-						0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-				if (self->Cycle != oldCycle) {
-					::KillTimer(main, 1);
-					self->m_fanTimer = ::SetTimer(main, 1, 1000 * self->Cycle, NULL);
-				}
-				if (self->ShowTempIcon != oldIcon) {
-					if (self->ShowTempIcon == 0) {
-						// classic colored symbol icon
-						if (!self->pTaskbarIcon) {
-							self->pTaskbarIcon = new TASKBARICON(main, 10, "TPFanControl");
-							self->pTaskbarIcon->SetIcon(self->CurrentIcon);
-						}
-					}
-					else {
-						// text temperature icon (recreated by the icon timer)
-						if (self->pTaskbarIcon) {
-							delete self->pTaskbarIcon;
-							self->pTaskbarIcon = NULL;
-						}
-					}
-				}
-
-				// refresh temps/list so the hex column and icon repaint immediately
-				::PostMessage(main, WM__GETDATA, 0, 0);
-			}
+			if (self) self->ApplySettingsFromDialog(hwnd);
 			::EndDialog(hwnd, IDOK);
+			return TRUE;
+
+		case 9320: // Apply: persist + live-apply but keep the dialog open
+			if (self) {
+				self->ApplySettingsFromDialog(hwnd);
+				// dark-mode may have just changed: re-theme this dialog too
+				ApplyDarkToDialog(hwnd, self->DarkMode);
+			}
 			return TRUE;
 
 		case IDCANCEL:
@@ -2231,6 +2413,101 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		break;
 	}
 	return FALSE;
+}
+
+//-------------------------------------------------------------------------
+//  read the Settings controls, persist to ini, and live-apply (shared by
+//  the OK and Apply buttons)
+//-------------------------------------------------------------------------
+void
+FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
+{
+	int oldDark  = this->DarkMode;
+	int oldLog   = this->ShowLog;
+	int oldTop   = this->StayOnTop;
+	int oldIcon  = this->ShowTempIcon;
+	int oldCycle = this->Cycle;
+
+	this->StartMinimized = (::IsDlgButtonChecked(hwnd, 9301) == BST_CHECKED);
+	this->StayOnTop      = (::IsDlgButtonChecked(hwnd, 9302) == BST_CHECKED);
+	this->ShowTempIcon   = (::IsDlgButtonChecked(hwnd, 9303) == BST_CHECKED);
+	this->ShowTempHex    = (::IsDlgButtonChecked(hwnd, 9304) == BST_CHECKED);
+	this->ShowLog        = (::IsDlgButtonChecked(hwnd, 9305) == BST_CHECKED);
+	this->DarkMode       = (::IsDlgButtonChecked(hwnd, 9306) == BST_CHECKED);
+	this->NoBallons      = (::IsDlgButtonChecked(hwnd, 9307) == BST_CHECKED);
+	this->Log2File       = (::IsDlgButtonChecked(hwnd, 9308) == BST_CHECKED);
+	this->Log2csv        = (::IsDlgButtonChecked(hwnd, 9309) == BST_CHECKED);
+	this->ShowGraph      = (::IsDlgButtonChecked(hwnd, 9314) == BST_CHECKED);
+	{
+		BOOL ok = FALSE;
+		int c = (int)::GetDlgItemInt(hwnd, 9310, &ok, FALSE);
+		if (ok && c >= 1 && c <= 600) this->Cycle = c;
+	}
+
+	// icon color thresholds (fields are in the display unit -> store as Celsius)
+	{
+		BOOL k0 = FALSE, k1 = FALSE, k2 = FALSE;
+		int v0 = (int)::GetDlgItemInt(hwnd, 9311, &k0, FALSE);
+		int v1 = (int)::GetDlgItemInt(hwnd, 9312, &k1, FALSE);
+		int v2 = (int)::GetDlgItemInt(hwnd, 9313, &k2, FALSE);
+		if (k0 && k1 && k2) {
+			if (this->Fahrenheit) {
+				v0 = (v0 - 32) * 5 / 9; v1 = (v1 - 32) * 5 / 9; v2 = (v2 - 32) * 5 / 9;
+			}
+			// require sane, strictly-ascending thresholds or leave unchanged
+			if (v0 >= 1 && v2 <= 120 && v0 < v1 && v1 < v2) {
+				this->IconLevels[0] = v0;
+				this->IconLevels[1] = v1;
+				this->IconLevels[2] = v2;
+			}
+		}
+	}
+
+	this->SaveConfig("TPFanControl.ini");
+
+	HWND main = this->hwndDialog;
+
+	// keep the in-window checkboxes in sync with the new state
+	::SendDlgItemMessage(main, 7010, BM_SETCHECK, this->ShowTempHex ? BST_CHECKED : BST_UNCHECKED, 0);
+	::SendDlgItemMessage(main, 7011, BM_SETCHECK, this->ShowLog     ? BST_CHECKED : BST_UNCHECKED, 0);
+	::SendDlgItemMessage(main, 7012, BM_SETCHECK, this->DarkMode    ? BST_CHECKED : BST_UNCHECKED, 0);
+
+	// live-apply the cheap changes
+	if (this->DarkMode != oldDark) this->ApplyTheme();
+	if (this->ShowLog != oldLog)   this->ApplyLogVisibility();
+	if (this->StayOnTop != oldTop)
+		::SetWindowPos(main, this->StayOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+			0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	if (this->Cycle != oldCycle) {
+		::KillTimer(main, 1);
+		this->m_fanTimer = ::SetTimer(main, 1, 1000 * this->Cycle, NULL);
+	}
+	if (this->ShowTempIcon != oldIcon) {
+		if (this->ShowTempIcon == 0) {
+			// classic colored symbol icon
+			if (!this->pTaskbarIcon) {
+				this->pTaskbarIcon = new TASKBARICON(main, 10, "TPFanControl");
+				this->pTaskbarIcon->SetIcon(this->CurrentIcon);
+			}
+		}
+		else {
+			// text temperature icon (recreated by the icon timer)
+			if (this->pTaskbarIcon) {
+				delete this->pTaskbarIcon;
+				this->pTaskbarIcon = NULL;
+			}
+		}
+	}
+
+	// show/hide the temperature history graph
+	{
+		int sw = this->ShowGraph ? SW_SHOW : SW_HIDE;
+		::ShowWindow(::GetDlgItem(main, 9202), sw);
+		::ShowWindow(::GetDlgItem(main, 8120), sw);
+	}
+
+	// refresh temps/list so the hex column and icon repaint immediately
+	::PostMessage(main, WM__GETDATA, 0, 0);
 }
 
 void FANCONTROL::ShowSettingsDialog()
@@ -2346,7 +2623,9 @@ void FANCONTROL::ProcessTextIcons(void) {
 				else
 					_itoa_s(this->icontemp, str_value, sizeof(str_value), 10);
 				sprintf_s(str_value, sizeof(str_value), "%s", str_value);
-				ppTbTextIcon[i]->ChangeText(str_value, this->gSensorNames[iMaxTemp], iFarbeIconB, iFontIconB, myszTip);
+				// tiny icon: show just the temperature (no sensor-name line). The
+				// sensor name is still in the tooltip (myszTip).
+				ppTbTextIcon[i]->ChangeText(str_value, "", iFarbeIconB, iFontIconB, myszTip);
 			}
 		}
 		pTextIconMutex->Unlock();
