@@ -12,3 +12,6 @@
 
 # Resource compiler temp files
 res/RC[a-z][0-9]*
+
+# Claude Code session memory
+memory/
