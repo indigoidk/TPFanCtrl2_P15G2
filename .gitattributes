@@ -1,0 +1,24 @@
+# Normalize line endings: Git stores LF, checks out native.
+* text=auto
+
+# Source — normalized text
+*.cpp     text
+*.h       text
+*.c       text
+*.md      text
+*.txt     text
+*.ini     text
+*.ps1     text
+*.yml     text
+
+# Visual Studio files — keep CRLF so the IDE never reformats them
+*.sln     text eol=crlf
+*.vcxproj text eol=crlf
+*.filters text eol=crlf
+*.rc      text eol=crlf
+
+# Binary assets — never touch
+*.bmp binary
+*.png binary
+*.ico binary
+*.lib binary
