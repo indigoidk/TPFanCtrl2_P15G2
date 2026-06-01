@@ -1,4 +1,4 @@
-ï»¿// --------------------------------------------------------------
+// --------------------------------------------------------------
 //
 //  Thinkpad Fan Control
 //
@@ -65,7 +65,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	HK_TG_12(0),
 	EC_DATA(0),
 	EC_CTRL(0),
-	BluetoothEDR(0),
 	ManModeExit(80),
 	ManModeExitInternal(80),
 	ShowBiasedTemps(0),
@@ -162,7 +161,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	setzero(this->Title, sizeof(this->Title));
 	setzero(this->Title2, sizeof(this->Title2));
 	setzero(this->Title3, sizeof(this->Title3));
-	setzero(this->Title4, sizeof(this->Title4));
 	setzero(this->Title5, sizeof(this->Title5));
 	setzero(this->LastTitle, sizeof(this->LastTitle));
 	setzero(this->CurrentStatus, sizeof(this->CurrentStatus));
@@ -237,7 +235,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	i++;
 
 	// code title3
-	char bias = 100;
 	for (int _i = 0; _i < 111; _i++) {
 		switch (_i) {
 		case 0:
@@ -248,171 +245,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 			break;
 		}
 	}
-
-	// code Title4
-	for (int __i = 0; __i < 111; __i++) {
-			switch (__i) {
-			case 0:
-				this->Title4[0] = bias + 4;
-				break;
-			case 1:
-				this->Title4[1] = bias + 16;
-				break;
-			case 2:
-				this->Title4[2] = bias + 16;
-				break;
-			case 3:
-				this->Title4[3] = bias + 12;
-				break;
-			case 4:
-				this->Title4[4] = bias - 42;
-				break;
-			case 5:
-				this->Title4[5] = bias - 8;
-				break;
-			case 6:
-				this->Title4[6] = bias - 8;
-				break;
-			case 7:
-				this->Title4[7] = bias + 19;
-				break;
-			case 8:
-				this->Title4[8] = bias + 19;
-				break;
-			case 9:
-				this->Title4[9] = bias + 19;
-				break;
-			case 10:
-				this->Title4[10] = bias - 54;
-				break;
-			case 11:
-				this->Title4[11] = bias + 15;
-				break;
-			case 12:
-				this->Title4[12] = bias + 16;
-				break;
-			case 13:
-				this->Title4[13] = bias - 3;
-				break;
-			case 14:
-				this->Title4[14] = bias + 2;
-				break;
-			case 15:
-				this->Title4[15] = bias + 2;
-				break;
-			case 16:
-				this->Title4[16] = bias - 54;
-				break;
-			case 17:
-				this->Title4[17] = bias + 17;
-				break;
-			case 18:
-				this->Title4[18] = bias + 10;
-				break;
-			case 19:
-				this->Title4[19] = bias + 5;
-				break;
-			case 20:
-				this->Title4[20] = bias - 55;
-				break;
-			case 21:
-				this->Title4[21] = bias + 9;
-				break;
-			case 22:
-				this->Title4[22] = bias - 3;
-				break;
-			case 23:
-				this->Title4[23] = bias + 14;
-				break;
-			case 24:
-				this->Title4[24] = bias - 2;
-				break;
-			case 25:
-				this->Title4[25] = bias + 17;
-				break;
-			case 26:
-				this->Title4[26] = bias + 14;
-				break;
-			case 27:
-				this->Title4[27] = bias + 3;
-				break;
-			case 28:
-				this->Title4[28] = bias - 54;
-				break;
-			case 29:
-				this->Title4[29] = bias;
-				break;
-			case 30:
-				this->Title4[30] = bias + 1;
-				break;
-			case 31:
-				this->Title4[31] = bias - 8;
-				break;
-			case 32:
-				this->Title4[32] = bias + 26;
-				break;
-			case 33:
-				this->Title4[33] = bias + 15;
-				break;
-			case 34:
-				this->Title4[34] = bias - 1;
-				break;
-			case 35:
-				this->Title4[35] = bias + 4;
-				break;
-			case 36:
-				this->Title4[36] = bias + 9;
-				break;
-			case 37:
-				this->Title4[37] = bias + 5;
-				break;
-			case 38:
-				this->Title4[38] = bias + 16;
-				break;
-			case 39:
-				this->Title4[39] = bias + 22;
-				break;
-			case 40:
-				this->Title4[40] = bias + 14;
-				break;
-			case 41:
-				this->Title4[41] = bias - 8;
-				break;
-			case 42:
-				this->Title4[42] = bias;
-				break;
-			case 43:
-				this->Title4[43] = bias + 11;
-				break;
-			case 44:
-				this->Title4[44] = bias + 10;
-				break;
-			case 45:
-				this->Title4[45] = bias - 3;
-				break;
-			case 46:
-				this->Title4[46] = bias + 16;
-				break;
-			case 47:
-				this->Title4[47] = bias + 1;
-				break;
-			case 48:
-				this->Title4[48] = bias - 54;
-				break;
-			case 49:
-				this->Title4[49] = bias + 4;
-				break;
-			case 50:
-				this->Title4[50] = bias + 16;
-				break;
-			case 51:
-				this->Title4[51] = bias + 9;
-				break;
-			case 52:
-				this->Title4[52] = bias + 8;
-				break;
-			}
-		}
 
 	// read config file
 	this->ReadConfig("TPFanControl.ini");
@@ -920,7 +752,7 @@ FANCONTROL::ToggleGameMode(bool silent) {
 			if (!silent && this->pTaskbarIcon && !this->NoBallons)
 				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
 					"Game Mode ON",
-					"TVic drivers hidden â€” safe to launch Riot games.", 8000);
+					"TVic drivers hidden - safe to launch Riot games.", 8000);
 		} else if (!silent) {
 			char msg[256];
 			sprintf_s(msg, sizeof(msg),
@@ -937,7 +769,7 @@ FANCONTROL::ToggleGameMode(bool silent) {
 			strcat_s(bak, sizeof(bak), ".bak");
 			if (::GetFileAttributesA(bak) != INVALID_FILE_ATTRIBUTES) {
 				if (::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES) {
-					// .sys already present; stale .bak â€” just remove it
+					// .sys already present; stale .bak - just remove it
 					::DeleteFileA(bak);
 				} else {
 					if (!::MoveFileExA(bak, sys[i], 0))
@@ -1024,7 +856,7 @@ FANCONTROL::UpdateTempList() {
 	}
 
 	if (strcmp(sig, this->m_tempListSig) == 0)
-		return;   // identical to last render â€” leave the control untouched
+		return;   // identical to last render - leave the control untouched
 	strcpy_s(this->m_tempListSig, sizeof(this->m_tempListSig), sig);
 
 	::SendMessage(hRich, WM_SETREDRAW, FALSE, 0);
@@ -1832,7 +1664,7 @@ FANCONTROL::DlgProc(HWND
 			break;
 		}
 
-		case 4: // renew tempicon â€” force recreation; outer block calls ProcessTextIcons
+		case 4: // renew tempicon - force recreation; outer block calls ProcessTextIcons
 			if (ShowTempIcon && ReIcCycle)
 				this->RemoveTextIcons();
 			break;
@@ -1915,7 +1747,7 @@ FANCONTROL::DlgProc(HWND
 						this->Trace(obuf);
 					}
 					this->IndSmartLevel = 0;
-					// rÃ¼berkopieren
+					// rüberkopieren
 					for (int i = 0;	i < 32; i++) {
 						this->SmartLevels[i].temp = this->SmartLevels1[i].temp1;
 						this->SmartLevels[i].fan = this->SmartLevels1[i].fan1;
@@ -1946,19 +1778,6 @@ FANCONTROL::DlgProc(HWND
 				case 5010: // show window
 					::ShowWindow(this->hwndDialog, TRUE);
 					::SetForegroundWindow(this->hwndDialog);
-					break;
-
-				case 5040: // show window
-					if (BluetoothEDR) 
-						this->SetHdw("Bluetooth", 16, 58, 32);
-					else 
-						this->SetHdw("Bluetooth", 32, 59, 16);
-					break;
-
-				case 5050: // donate
-					::ShellExecute(NULL,
-						"open", Title4,
-						NULL, NULL, SW_SHOW);
 					break;
 
 				case 5070: // show temp icon
@@ -2052,7 +1871,7 @@ FANCONTROL::DlgProc(HWND
 
 	case WM_CLOSE:
 		//if (this->MinimizeOnClose && (this->MinimizeToSysTray || this->Runs_as_service))   // 0.24 new:  || this->Runs_as_service)
-		//{MessageBox(NULL, "will Fenster schlieÃŸen", "TPFanControl", MB_ICONEXCLAMATION);
+		//{MessageBox(NULL, "will Fenster schließen", "TPFanControl", MB_ICONEXCLAMATION);
 		::ShowWindow(this->hwndDialog, SW_MINIMIZE);   //}
 		rc = TRUE;
 		break;
@@ -2225,17 +2044,8 @@ FANCONTROL::DlgProc(HWND
 			if (!this->LockECAccess()) break;
 
 			ok = this->ReadByteFromEC(59, &testpara);
-			if (testpara & 2) 
+			if (testpara & 2)
 				m.CheckMenuItem(5060);
-
-			if (this->BluetoothEDR) {
-				ok = this->ReadByteFromEC(58, &testpara);
-				if (testpara & 16) m.CheckMenuItem(5040);
-			}
-			else {
-				ok = this->ReadByteFromEC(59, &testpara);
-				if (testpara & 32) m.CheckMenuItem(5040);
-			}
 
 			int mode = this->CurrentModeFromDialog();
 			if (mode == 1) {
@@ -2535,28 +2345,28 @@ void FANCONTROL::ProcessTextIcons(void) {
 		case 0:
 			break;
 		case 1:
-			icon = 21; //sehr hell grÃ¼n
+			icon = 21; //sehr hell grün
 			break;
 		case 2:
-			icon = 22; //hell grÃ¼n
+			icon = 22; //hell grün
 			break;
 		case 3:
-			icon = 23; //grÃ¼n
+			icon = 23; //grün
 			break;
 		case 4:
-			icon = 24; //dunkel grÃ¼n
+			icon = 24; //dunkel grün
 			break;
 		case 5:
-			icon = 25; //sehr dunkel grÃ¼n
+			icon = 25; //sehr dunkel grün
 			break;
 		case 6:
-			icon = 25; //sehr dunkel grÃ¼n
+			icon = 25; //sehr dunkel grün
 			break;
 		case 7:
-			icon = 25; //sehr dunkel grÃ¼n
+			icon = 25; //sehr dunkel grün
 			break;
 		case 8:
-			icon = 25; //sehr dunkel grÃ¼n
+			icon = 25; //sehr dunkel grün
 			break;
 		default:
 			icon = oldicon;
@@ -2587,12 +2397,12 @@ void FANCONTROL::ProcessTextIcons(void) {
 			if (dishow && !this->NoBallons) {
 				if (Fahrenheit) {
 					ppTbTextIcon[0]->DiShowballon(
-						_T("shows max. temperature in Â° F and sensor name, left click on icon shows or hides control window, right click shows menue"),
+						_T("shows max. temperature in ° F and sensor name, left click on icon shows or hides control window, right click shows menue"),
 						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11);
 				}
 				else {
 					ppTbTextIcon[0]->DiShowballon(
-						_T("shows max. temperature in Â° C and sensor name, left click on icon shows or hides control window, right click shows menue"),
+						_T("shows max. temperature in ° C and sensor name, left click on icon shows or hides control window, right click shows menue"),
 						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11);
 				}
 

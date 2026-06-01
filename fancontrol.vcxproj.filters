@@ -119,9 +119,6 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="res\resource" />
-  </ItemGroup>
-  <ItemGroup>
     <Library Include="TVicPort.lib" />
   </ItemGroup>
   <ItemGroup>

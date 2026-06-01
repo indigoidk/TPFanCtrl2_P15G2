@@ -147,7 +147,6 @@ protected:
 		HK_TG_MS,
 		HK_TG_12;
 	int EC_CTRL, EC_DATA;
-	int BluetoothEDR;
 	int ManModeExit;
 	int ManModeExitInternal;
 	int ShowBiasedTemps;
@@ -206,7 +205,6 @@ protected:
 	char Title[128];
 	char Title2[128];
 	char Title3[128];
-	char Title4[128];
 	char Title5[128];
 	char LastTitle[128];
 	char LastTooltip[128];

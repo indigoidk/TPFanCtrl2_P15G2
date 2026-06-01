@@ -385,11 +385,6 @@ FANCONTROL::ReadConfig(const char* configfile)
 				continue;
 			}
 
-			if (_strnicmp(buf, "BluetoothEDR=", 13) == 0) {
-				this->BluetoothEDR = atoi(buf + 13);
-				continue;
-			}
-
 			if (_strnicmp(buf, "ManModeExit=", 12) == 0) {
 				this->ManModeExit = atoi(buf + 12);
 				continue;
@@ -843,7 +838,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 	sprintf_s(buf, sizeof(buf), "  IgnoreSensors= %s, ProcessPriority= %d, IconCycle= %d", IgnoreSensors, ProcessPriority, IconCycle);
 	this->Trace(buf);
 
-	sprintf_s(buf, sizeof(buf), "  BluetoothEDR= %d, NoWaitMessage= %d, ShowBiasedTemps= %d", this->BluetoothEDR, NoWaitMessage, ShowBiasedTemps);
+	sprintf_s(buf, sizeof(buf), "  NoWaitMessage= %d, ShowBiasedTemps= %d", NoWaitMessage, ShowBiasedTemps);
 	this->Trace(buf);
 
 	//ManModeExit Fahrenheit to Celsius and v.v.
