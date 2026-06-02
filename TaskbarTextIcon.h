@@ -14,13 +14,30 @@ class CTaskbarTextIcon
 		int iFontIconC;
 		LPCTSTR aTooltipC;
 
-		void _createdicon(const int iFarbeIconC, LPCTSTR aTooltipC, const int iFontIconC) 
-			{	
+		void _createdicon(const int iFarbeIconC, LPCTSTR aTooltipC, const int iFontIconC)
+			{
 			if(m_pSystray) m_pSystray->SetTooltipText(aTooltipC);
+
+			// The tooltip update above is cheap; rebuilding the icon bitmap is not
+			// (it allocates DCs, bitmaps, a font and an HICON every call). This runs
+			// up to twice a second from the title timer, so skip the GDI rebuild when
+			// nothing that affects the rendered icon has actually changed.
+			if(m_pDicon
+				&& iFarbeIconC == m_lastFarbe
+				&& iFontIconC == m_lastFont
+				&& strcmp(m_line1, m_lastLine1) == 0
+				&& strcmp(m_line2, m_lastLine2) == 0)
+				return;
+
 			CDynamicIcon* pDiconTemp = new CDynamicIcon(m_line1, m_line2, iFarbeIconC, iFontIconC, m_iconSize);
 			if(m_pSystray) m_pSystray->SetIcon(pDiconTemp->GetHIcon());
 			if(m_pDicon)delete m_pDicon;
 			m_pDicon = pDiconTemp;
+
+			m_lastFarbe = iFarbeIconC;
+			m_lastFont  = iFontIconC;
+			strcpy_s(m_lastLine1, sizeof(m_lastLine1), m_line1);
+			strcpy_s(m_lastLine2, sizeof(m_lastLine2), m_line2);
 			};
 
 		void _ballondicon(LPCTSTR szText,LPCTSTR szTitle,DWORD dwIcon,UINT uTimeout) 
@@ -61,6 +78,10 @@ class CTaskbarTextIcon
 		bool m_BgTransparent;
 		int m_iconSize;   // DPI-scaled tray icon size (SM_CXSMICON)
 
+		// last-rendered icon inputs, so _createdicon can skip an unchanged rebuild
+		char m_lastLine1[LINESLEN], m_lastLine2[LINESLEN];
+		int  m_lastFarbe, m_lastFont;
+
 		void _setlines(const char* line1,const char* line2) 
 		{
         strncpy_s(m_line1,sizeof(m_line1),line1,3);
@@ -89,11 +110,15 @@ class CTaskbarTextIcon
         m_TextColor(RGB(0,0,0)),
         m_BgColor(RGB(255,0,0)),
         m_BgTransparent(false),
-        m_iconSize(::GetSystemMetrics(SM_CXSMICON))
+        m_iconSize(::GetSystemMetrics(SM_CXSMICON)),
+        m_lastFarbe(-1),
+        m_lastFont(-1)
 			{
+			m_lastLine1[0] = '\0';
+			m_lastLine2[0] = '\0';
 			_setlines(line1,line2);
 			_createdicon(iFarbeIconC, aTooltipC, iFontIconC);
-			_createsystray(hInst, hWnd, uCallbackMessage, uID, aTooltipC);        
+			_createsystray(hInst, hWnd, uCallbackMessage, uID, aTooltipC);
 			};
 
     ~CTaskbarTextIcon(void)

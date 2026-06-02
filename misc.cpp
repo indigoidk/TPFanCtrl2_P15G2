@@ -176,10 +176,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 	FILE* f;
 	errno_t errf = fopen_s(&f, configfile, "r");
 	if (!errf) {
-		while (!feof(f)) {
-			strcpy_s(buf, sizeof(buf), "");
-
-			fgets(buf, sizeof(buf), f);
+		while (fgets(buf, sizeof(buf), f)) {
 
 			if (buf[0] == '/' || buf[0] == '#' || buf[0] == ';')
 				continue;
@@ -455,164 +452,34 @@ FANCONTROL::ReadConfig(const char* configfile)
 				continue;
 			}
 
-			if (_strnicmp(buf, "SensorName1=", 12) == 0) {
-				strncpy_s(this->gSensorNames[0], sizeof(this->gSensorNames[0]), buf + 12, 3);
-				continue;
+			// SensorNameN= (N=1..16) -> gSensorNames[N-1], up to 3 chars
+			{
+				bool handled = false;
+				for (int n = 1; n <= 16; n++) {
+					char key[20];
+					int klen = sprintf_s(key, sizeof(key), "SensorName%d=", n);
+					if (_strnicmp(buf, key, klen) == 0) {
+						strncpy_s(this->gSensorNames[n - 1], sizeof(this->gSensorNames[n - 1]), buf + klen, 3);
+						handled = true;
+						break;
+					}
+				}
+				if (handled) continue;
 			}
 
-			if (_strnicmp(buf, "SensorName2=", 12) == 0) {
-				strncpy_s(this->gSensorNames[1], sizeof(this->gSensorNames[1]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName3=", 12) == 0) {
-				strncpy_s(this->gSensorNames[2], sizeof(this->gSensorNames[2]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName4=", 12) == 0) {
-				strncpy_s(this->gSensorNames[3], sizeof(this->gSensorNames[3]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName5=", 12) == 0) {
-				strncpy_s(this->gSensorNames[4], sizeof(this->gSensorNames[4]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName6=", 12) == 0) {
-				strncpy_s(this->gSensorNames[5], sizeof(this->gSensorNames[5]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName7=", 12) == 0) {
-				strncpy_s(this->gSensorNames[6], sizeof(this->gSensorNames[6]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName8=", 12) == 0) {
-				strncpy_s(this->gSensorNames[7], sizeof(this->gSensorNames[7]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName9=", 12) == 0) {
-				strncpy_s(this->gSensorNames[8], sizeof(this->gSensorNames[8]), buf + 12, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName10=", 13) == 0) {
-				strncpy_s(this->gSensorNames[9], sizeof(this->gSensorNames[9]), buf + 13, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName11=", 13) == 0) {
-				strncpy_s(this->gSensorNames[10], sizeof(this->gSensorNames[10]), buf + 13, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName12=", 13) == 0) {
-				strncpy_s(this->gSensorNames[11], sizeof(this->gSensorNames[11]), buf + 13, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName13=", 13) == 0) {
-				strncpy_s(this->gSensorNames[12], sizeof(this->gSensorNames[12]), buf + 13, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName14=", 13) == 0) {
-				strncpy_s(this->gSensorNames[13], sizeof(this->gSensorNames[13]), buf + 13, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName15=", 13) == 0) {
-				strncpy_s(this->gSensorNames[14], sizeof(this->gSensorNames[14]), buf + 13, 3);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorName16=", 13) == 0) {
-				strncpy_s(this->gSensorNames[15], sizeof(this->gSensorNames[15]), buf + 13, 3);
-				continue;
-			}
-
-			if (_strnicmp(buf, "SensorOffset1=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[0].offs, &this->SensorOffset[0].hystMin, &this->SensorOffset[0].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset2=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[1].offs, &this->SensorOffset[1].hystMin, &this->SensorOffset[1].hystMax);
-				continue;
-			}
-
-			if (_strnicmp(buf, "SensorOffset3=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[2].offs, &this->SensorOffset[2].hystMin, &this->SensorOffset[2].hystMax);
-				continue;
-			}
-
-			if (_strnicmp(buf, "SensorOffset4=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[3].offs, &this->SensorOffset[3].hystMin, &this->SensorOffset[3].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset5=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[4].offs, &this->SensorOffset[4].hystMin, &this->SensorOffset[4].hystMax);
-				continue;
-			}
-
-			if (_strnicmp(buf, "SensorOffset6=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[5].offs, &this->SensorOffset[5].hystMin, &this->SensorOffset[5].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset7=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[6].offs, &this->SensorOffset[6].hystMin, &this->SensorOffset[6].hystMax);
-				continue;
-			}
-
-			if (_strnicmp(buf, "SensorOffset8=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[7].offs, &this->SensorOffset[7].hystMin, &this->SensorOffset[7].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset9=", 14) == 0) {
-				sscanf_s(buf + 14, "%d %d %d", &this->SensorOffset[8].offs, &this->SensorOffset[8].hystMin, &this->SensorOffset[8].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset10=", 15) == 0) {
-				sscanf_s(buf + 15, "%d %d %d", &this->SensorOffset[9].offs, &this->SensorOffset[9].hystMin, &this->SensorOffset[9].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset11=", 15) == 0) {
-				sscanf_s(buf + 15, "%d %d %d", &this->SensorOffset[10].offs, &this->SensorOffset[10].hystMin, &this->SensorOffset[10].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset12=", 15) == 0) {
-				sscanf_s(buf + 15, "%d %d %d", &this->SensorOffset[11].offs, &this->SensorOffset[11].hystMin, &this->SensorOffset[11].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset13=", 15) == 0) {
-				sscanf_s(buf + 15, "%d %d %d", &this->SensorOffset[12].offs, &this->SensorOffset[12].hystMin, &this->SensorOffset[12].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset14=", 15) == 0) {
-				sscanf_s(buf + 15, "%d %d %d", &this->SensorOffset[13].offs, &this->SensorOffset[13].hystMin, &this->SensorOffset[13].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset15=", 15) == 0) {
-				sscanf_s(buf + 15, "%d %d %d", &this->SensorOffset[14].offs, &this->SensorOffset[14].hystMin, &this->SensorOffset[14].hystMax);
-				continue;
-			}
-			
-			if (_strnicmp(buf, "SensorOffset16=", 15) == 0) {
-				sscanf_s(buf + 15, "%d %d %d", &this->SensorOffset[15].offs, &this->SensorOffset[15].hystMin, &this->SensorOffset[15].hystMax);
-				continue;
+			// SensorOffsetN= (N=1..16) -> SensorOffset[N-1]: offs, hystMin, hystMax
+			{
+				bool handled = false;
+				for (int n = 1; n <= 16; n++) {
+					char key[20];
+					int klen = sprintf_s(key, sizeof(key), "SensorOffset%d=", n);
+					if (_strnicmp(buf, key, klen) == 0) {
+						sscanf_s(buf + klen, "%d %d %d", &this->SensorOffset[n - 1].offs, &this->SensorOffset[n - 1].hystMin, &this->SensorOffset[n - 1].hystMax);
+						handled = true;
+						break;
+					}
+				}
+				if (handled) continue;
 			}
 
 			if (_strnicmp(buf, "IgnoreSensors=", 14) == 0) {
@@ -824,7 +691,14 @@ FANCONTROL::ReadConfig(const char* configfile)
 			this->SensorOffset[6].offs, this->SensorOffset[7].offs, this->SensorOffset[8].offs,
 			this->SensorOffset[9].offs, this->SensorOffset[10].offs, this->SensorOffset[11].offs);
 
-		for (i = 0; i < 15; i++) { SensorOffset[i].offs = SensorOffset[i].offs * 5 / 9; }
+		// Convert all entries, not just 15. offs is a temperature *delta* (scale
+		// only), while hystMin/hystMax are absolute temps compared against the
+		// Celsius sensor reading in HandleData, so convert them like a temperature.
+		for (i = 0; i < (int)ARRAYMAX(SensorOffset); i++) {
+			SensorOffset[i].offs    =  SensorOffset[i].offs * 5 / 9;
+			SensorOffset[i].hystMin = (SensorOffset[i].hystMin - 32) * 5 / 9;
+			SensorOffset[i].hystMax = (SensorOffset[i].hystMax - 32) * 5 / 9;
+		}
 	}
 	else {
 		sprintf_s(buf, sizeof(buf), "  SensorOffset1-12= %d %d %d %d %d %d %d %d %d %d %d %d ° C",
@@ -1019,7 +893,7 @@ FANCONTROL::Trace(const char* text) {
 
 void
 FANCONTROL::Tracecsv(const char* text) {
-	char trace[16384] = "", datebuf[128] = "", line[512] = "";
+	char datebuf[128] = "", line[512] = "";
 
 	this->CurrentTimeLocalized(datebuf, sizeof(datebuf));
 
@@ -1041,9 +915,7 @@ FANCONTROL::Tracecsv(const char* text) {
 
 void
 FANCONTROL::Tracecsvod(const char* text) {
-	char trace[16384] = "", datebuf[128] = "", line[512] = "";
-
-	this->CurrentDateTimeLocalized(datebuf, sizeof(datebuf));
+	char line[512] = "";
 
 	if (strlen(text))
 		sprintf_s(line, sizeof(line), "%s\r\n", text);	// probably acpi reading conflict

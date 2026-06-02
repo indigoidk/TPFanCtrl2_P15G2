@@ -29,11 +29,33 @@
 #define TP_ECVALUE_SELFAN2      (char)0x0001
 
 //-------------------------------------------------------------------------
+//  log a "Change Mode from <prev>-><cur>" line; nothing if the mode is unchanged
+//-------------------------------------------------------------------------
+void
+FANCONTROL::TraceModeChange() {
+	if (this->PreviousMode == this->CurrentMode)
+		return;
+
+	const char* from =
+		this->PreviousMode == 1 ? "BIOS->" :
+		this->PreviousMode == 2 ? "Smart->" :
+		this->PreviousMode == 3 ? "Manual->" : "";
+	const char* to =
+		this->CurrentMode == 1 ? "BIOS, setting fan speed" :
+		this->CurrentMode == 2 ? "Smart, recalculate fan speed" :
+		this->CurrentMode == 3 ? "Manual, setting fan speed" : "";
+
+	char msg[128];
+	sprintf_s(msg, sizeof(msg), "Change Mode from %s%s", from, to);
+	this->Trace(msg);
+}
+
+//-------------------------------------------------------------------------
 //  switch fan according to settings
 //-------------------------------------------------------------------------
 int
 FANCONTROL::HandleData(void) {
-	char obuf[256] = "", obuf2[128] = "",
+	char obuf2[128] = "",
 		templist[256] = "", manlevel[16] = "", title2[128] = "";
 	int i, maxtemp, imaxtemp, ok = 0;
 
@@ -189,7 +211,8 @@ FANCONTROL::HandleData(void) {
 		}
 	}
 
-	templist[strlen(templist) - 1] = '\0';
+	if (templist[0])
+		templist[strlen(templist) - 1] = '\0';   // drop trailing separator (guard empty)
 
 	if (Fahrenheit)
 		sprintf_s(CurrentStatus, sizeof(CurrentStatus), "Fan: 0x%02x / Switch: %d° F (%s)", State.FanCtrl, MaxTemp * 9 / 5 + 32, templist);
@@ -221,25 +244,7 @@ FANCONTROL::HandleData(void) {
 	switch (this->CurrentMode) {
 
 	case 1: // BIOS
-		if (this->PreviousMode != this->CurrentMode) {
-			sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Change Mode from ");
-
-			if (this->PreviousMode == 1)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "BIOS->");
-			if (this->PreviousMode == 2)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Smart->");
-			if (this->PreviousMode == 3)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Manual->");
-
-			if (this->CurrentMode == 1)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "BIOS, setting fan speed");
-			if (this->CurrentMode == 2)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Smart, recalculate fan speed");
-			if (this->CurrentMode == 3)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Manual, setting fan speed");
-
-			this->Trace(obuf);
-		}
+		this->TraceModeChange();
 
 		if (this->State.FanCtrl != 0x080)
 			ok = this->SetFan("BIOS", 0x80);
@@ -250,25 +255,7 @@ FANCONTROL::HandleData(void) {
 		break;
 
 	case 3: // Manual
-		if (this->PreviousMode != this->CurrentMode) {
-			sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Change Mode from ");
-
-			if (this->PreviousMode == 1)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "BIOS->");
-			if (this->PreviousMode == 2)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Smart->");
-			if (this->PreviousMode == 3)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Manual->");
-
-			if (this->CurrentMode == 1)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "BIOS, setting fan speed");
-			if (this->CurrentMode == 2)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Smart, recalculate fan speed");
-			if (this->CurrentMode == 3)
-				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Manual, setting fan speed");
-
-			this->Trace(obuf);
-		}
+		this->TraceModeChange();
 
 		::GetDlgItemText(this->hwndDialog, 8310, manlevel, sizeof(manlevel));
 
@@ -299,21 +286,9 @@ FANCONTROL::SmartControl(void) {
 		newfanctrl = -1,
 		levelIndex = -1,
 		fanctrl = this->State.FanCtrl;
-	char obuf[256] = "";
 
-	if (this->PreviousMode == 1) {
-		sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Change Mode from BIOS->");
-		sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Smart, recalculate fan speed");
-
-		this->Trace(obuf);
-	}
-
-	if (this->PreviousMode == 3) {
-		sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Change Mode from Manual->");
-		sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "Smart, recalculate fan speed");
-
-		this->Trace(obuf);
-	}
+	// CurrentMode is Smart (2) here; log a BIOS->Smart / Manual->Smart transition
+	this->TraceModeChange();
 
 //i         Temp Fan Hup Hdown 
 //0 Level = 50   0   0   0 

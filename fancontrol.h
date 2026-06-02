@@ -258,6 +258,8 @@ protected:
 
 	void SmartControl();
 
+	void TraceModeChange();   // log "Change Mode from <prev>-><cur>" (no-op if unchanged)
+
 	int SetFan(const char* source, int level, bool final = false);
 
 	int SetHdw(const char* source, int hdwctrl, int HdwOffset, int AnyWayBit);
