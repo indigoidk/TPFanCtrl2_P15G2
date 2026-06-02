@@ -1,8 +1,23 @@
 # TPFanControl — P15 Gen2 Dual-Fan build
 
+[![build](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml/badge.svg)](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml)
+[![latest release](https://img.shields.io/github/v/release/indigoidk/TPFanCtrl2_P15G2?label=download)](https://github.com/indigoidk/TPFanCtrl2_P15G2/releases/latest)
+
 A Windows fan-control utility for Lenovo ThinkPads. It reads the embedded
 controller (EC) for temperatures and fan speeds and lets you run the fan in
 **BIOS (automatic)**, **Smart (temperature-curve)**, or **Manual** mode.
+
+## Download
+
+**➜ [Download the latest release](https://github.com/indigoidk/TPFanCtrl2_P15G2/releases/latest)**
+
+Grab the `TPFanControl-P15G2-*.zip`, unzip it anywhere, and run
+`TPFanControl.exe` **as Administrator**. The zip includes a pre-tuned
+`TPFanControl.ini` (P15 Gen2 fan curve).
+
+> - Windows SmartScreen may warn about the unsigned exe → **More info → Run anyway**.
+> - You also need the **TVicPort** driver installed on the machine (see
+>   [Requirements](#requirements)); it is not redistributed here for license reasons.
 
 This is a fork of the classic *TPFanControl / TPFanCtrl2* tailored for the
 **ThinkPad P15 Gen2 (dual fan)**, with a number of additional features (see
@@ -52,6 +67,14 @@ msbuild fancontrol.sln /m /p:Configuration=Release /p:Platform=Win32
 The output is `Release\TPFanControl.exe`. Every push and pull request is also
 built by GitHub Actions (`.github/workflows/build.yml`), which uploads the exe
 as a build artifact.
+
+Pushing a version tag publishes a downloadable **Release** with the packaged
+zip attached (`.github/workflows/release.yml`):
+
+```
+git tag v2.33.1
+git push origin v2.33.1
+```
 
 ## Configuration
 

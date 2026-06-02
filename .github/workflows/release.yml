@@ -1,0 +1,46 @@
+name: release
+
+# Publish a GitHub Release with the built binary whenever a version tag is pushed:
+#   git tag v2.33.1 && git push origin v2.33.1
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write   # required for gh release create
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release | Win32)
+        run: msbuild fancontrol.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver   = "${{ github.ref_name }}"
+          $stage = "TPFanControl-P15G2-$ver"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item Release/TPFanControl.exe $stage/
+          Copy-Item TPFanControl.ini         $stage/
+          Copy-Item README.md                $stage/
+          Compress-Archive -Path "$stage/*" -DestinationPath "$stage.zip" -Force
+          "ASSET=$stage.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "$env:ASSET" "Release/TPFanControl.exe" `
+            --title "TPFanControl P15G2 ${{ github.ref_name }}" `
+            --generate-notes
