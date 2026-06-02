@@ -2254,7 +2254,11 @@ void FANCONTROL::ProcessTextIcons(void) {
 		}
 	}
 
-	if (this->IconColorFan) {
+	// Fan-speed coloring (green shades 21-25) applies only while the temperature
+	// is still in the safe/green band (icon == 11). Once a warm/hot/critical
+	// threshold is crossed, the temperature color (amber/orange/red) wins, so
+	// thermal state is always visible even with IconColorFan enabled.
+	if (this->IconColorFan && icon == 11) {
 		switch (fan1speed / 1000) {
 		case 0:
 			break;

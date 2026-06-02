@@ -579,7 +579,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"Level=90 128\r\n"
 				"\r\n"
 				"# Tray icon color thresholds: yellow orange red (deg C)\r\n"
-				"IconLevels=65 75 85\r\n"
+				"IconLevels=50 65 78\r\n"
 				"\r\n"
 				"# Leave Manual mode if temperature reaches this (deg C)\r\n"
 				"ManModeExit=80\r\n",

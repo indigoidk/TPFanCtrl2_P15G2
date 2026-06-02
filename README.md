@@ -90,6 +90,17 @@ Highlights:
 
 ## Changelog
 
+### v2.33.4
+
+- Tray icon now always shows thermal state: with `IconColorFan=1` the fan-speed
+  green shades apply only while the temperature is in the safe band — once a
+  warm/hot/critical `IconLevels` threshold is crossed the icon turns
+  amber/orange/red regardless of fan RPM. (Previously `IconColorFan=1` pinned
+  the icon to a green shade by RPM, so it never reflected temperature.)
+- Lowered the shipped default `IconLevels` from `65 75 85` to `50 65 78` so a
+  fresh install reflects temperature in a typical laptop range. (Existing
+  `TPFanControl.ini` files are unchanged.)
+
 ### v2.33.3
 
 - Removed the unused named-pipe broadcast (8 pipes were created and written
