@@ -176,7 +176,7 @@ protected:
 	BOOL m_layoutInit;   // base geometry captured yet?
 	int  m_baseCW, m_baseCH;   // design-time client size
 	int  m_minW, m_minH;       // minimum window size (= design size)
-	RECT m_baseRC[16];   // design-time control rects (client coords)
+	RECT m_baseRC[17];   // design-time control rects (client coords)
 	void ReflowLayout();       // re-anchor controls on WM_SIZE
 
 	// rolling history of MaxTemp for the in-dialog sparkline (owner-draw static 8120)

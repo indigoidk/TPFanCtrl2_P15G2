@@ -899,7 +899,7 @@ FANCONTROL::ReflowLayout() {
 	if (!this->hwndDialog) return;
 
 	// id, then anchor flags: add dW to x/w, dH to y/h
-	static const struct { int id, ax, ay, aw, ah; } A[16] = {
+	static const struct { int id, ax, ay, aw, ah; } A[17] = {
 		{ 9198, 0, 0, 0, 1 },   // Temperatures group: grow height
 		{ 8101, 0, 0, 0, 1 },   // temperature list:   grow height
 		{ 7001, 0, 1, 0, 0 },   // 'all'    radio: follow bottom
@@ -916,6 +916,7 @@ FANCONTROL::ReflowLayout() {
 		{ 7013, 0, 1, 0, 0 },   // Game mode checkbox: follow bottom
 		{ 9202, 0, 1, 1, 0 },   // Temp history group: follow bottom, grow width
 		{ 8120, 0, 1, 1, 0 },   // sparkline:          follow bottom, grow width
+		{ 5100, 0, 1, 0, 0 },   // Settings button: follow bottom (fixed pos/size)
 	};
 
 	RECT rc;
@@ -941,7 +942,7 @@ FANCONTROL::ReflowLayout() {
 				if (narrow > 200) this->m_minW = narrow;
 			}
 		}
-		for (int i = 0; i < 16; i++) {
+		for (int i = 0; i < 17; i++) {
 			HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 			RECT r = { 0, 0, 0, 0 };
 			if (h) {
@@ -957,8 +958,8 @@ FANCONTROL::ReflowLayout() {
 	int dW = cw - this->m_baseCW;
 	int dH = ch - this->m_baseCH;
 
-	HDWP hdwp = ::BeginDeferWindowPos(16);
-	for (int i = 0; i < 16; i++) {
+	HDWP hdwp = ::BeginDeferWindowPos(17);
+	for (int i = 0; i < 17; i++) {
 		HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 		if (!h) continue;
 		const RECT& b = this->m_baseRC[i];
@@ -2072,6 +2073,10 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		::CheckDlgButton(hwnd, 9308, self->Log2File       ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9309, self->Log2csv        ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9314, self->ShowGraph      ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9321, self->IconColorFan    ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9322, self->ShowBiasedTemps ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9323, self->Lev64Norm       ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9324, self->NoExtSensor      ? BST_CHECKED : BST_UNCHECKED);
 		::SetDlgItemInt(hwnd, 9310, self->Cycle, FALSE);
 
 		// icon color thresholds, shown in the user's current display unit
@@ -2158,6 +2163,10 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 	this->Log2File       = (::IsDlgButtonChecked(hwnd, 9308) == BST_CHECKED);
 	this->Log2csv        = (::IsDlgButtonChecked(hwnd, 9309) == BST_CHECKED);
 	this->ShowGraph      = (::IsDlgButtonChecked(hwnd, 9314) == BST_CHECKED);
+	this->IconColorFan    = (::IsDlgButtonChecked(hwnd, 9321) == BST_CHECKED);
+	this->ShowBiasedTemps = (::IsDlgButtonChecked(hwnd, 9322) == BST_CHECKED);
+	this->Lev64Norm       = (::IsDlgButtonChecked(hwnd, 9323) == BST_CHECKED);
+	this->NoExtSensor     = (::IsDlgButtonChecked(hwnd, 9324) == BST_CHECKED);
 	{
 		BOOL ok = FALSE;
 		int c = (int)::GetDlgItemInt(hwnd, 9310, &ok, FALSE);

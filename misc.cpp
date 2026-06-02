@@ -39,9 +39,13 @@ FANCONTROL::SaveConfig(const char* configfile)
 		{ "Log2csv",        this->Log2csv },
 		{ "Cycle",          this->Cycle },
 		{ "ShowGraph",      this->ShowGraph },
+		{ "IconColorFan",   this->IconColorFan },
+		{ "ShowBiasedTemps",this->ShowBiasedTemps },
+		{ "Lev64Norm",      this->Lev64Norm },
+		{ "NoExtSensor",    this->NoExtSensor },
 	};
 	const int N = (int)(sizeof(items) / sizeof(items[0]));
-	bool done[16] = { false };
+	bool done[32] = { false };
 	bool doneIcon = false;   // IconLevels is a 3-int line, handled separately
 
 	// IconLevels are stored internally in Celsius; write them back in the user's
@@ -744,7 +748,9 @@ FANCONTROL::ReadConfig(const char* configfile)
 	this->Trace("");
 
 	if (this->Log2csv == 1) {
-		int	delfile = system("del TPFanControl_last_csv.txt && ren TPFanControl_csv.txt TPFanControl_last_csv.txt");
+		// rotate the previous CSV without spawning cmd.exe
+		::DeleteFileA("TPFanControl_last_csv.txt");
+		::MoveFileExA("TPFanControl_csv.txt", "TPFanControl_last_csv.txt", MOVEFILE_REPLACE_EXISTING);
 
 		sprintf_s(buf, sizeof(buf), "time;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;rpm;fan;switch;", 
 			this->gSensorNames[0], this->gSensorNames[1], this->gSensorNames[2], 
@@ -941,6 +947,8 @@ FANCONTROL::CreateThread(int(_stdcall* fnct)(ULONG), ULONG p) {
 	LPTHREAD_START_ROUTINE thread = (LPTHREAD_START_ROUTINE)fnct;
 	DWORD tid;
 	HANDLE hThread;
-	hThread = ::CreateThread(NULL, 8 * 4096, thread, (void*)p, 0, &tid);
+	// 256 KB stack: the work thread calls Trace(), which uses a large local
+	// buffer; the old 32 KB stack left little headroom.
+	hThread = ::CreateThread(NULL, 256 * 1024, thread, (void*)p, 0, &tid);
 	return hThread;
 }

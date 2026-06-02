@@ -90,6 +90,19 @@ Highlights:
 
 ## Changelog
 
+### v2.33.5
+
+- Added a **Settings…** button to the main window (previously only reachable
+  from the tray menu).
+- Settings dialog gained a **Behavior** section exposing previously ini-only
+  flags, all persisted to `TPFanControl.ini`:
+  - Color tray icon by fan speed (else by temperature) — `IconColorFan`
+  - Apply sensor offsets to displayed temperatures — `ShowBiasedTemps`
+  - Treat fan level 64 as normal (not maximum) — `Lev64Norm`
+  - Skip external / secondary temp sensors — `NoExtSensor`
+- Internal: worker-thread stack raised to 256 KB (Trace headroom); CSV log
+  rotation now uses Win32 file calls instead of spawning `cmd.exe`.
+
 ### v2.33.4
 
 - Tray icon now always shows thermal state: with `IconColorFan=1` the fan-speed
