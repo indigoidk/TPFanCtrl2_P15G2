@@ -19,7 +19,17 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build (Release | Win32)
-        run: msbuild fancontrol.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32
+        shell: pwsh
+        run: |
+          # The checked-in project targets VS18 locally (toolset v145, SDK
+          # 10.0.26100). Hosted runners ship VS2022 (v143), so override the
+          # toolset and pick whatever 10.x SDK is installed - without editing
+          # the project file the developer uses.
+          $sdk = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory |
+                  Where-Object { $_.Name -match '^10\.' } | Sort-Object Name)[-1].Name
+          Write-Host "Building with PlatformToolset=v143, WindowsTargetPlatformVersion=$sdk"
+          msbuild fancontrol.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=$sdk
 
       - name: Upload TPFanControl.exe
         uses: actions/upload-artifact@v4

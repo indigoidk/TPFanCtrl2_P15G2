@@ -21,7 +21,15 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build (Release | Win32)
-        run: msbuild fancontrol.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32
+        shell: pwsh
+        run: |
+          # See build.yml: override the dev's v145/SDK-26100 target to the
+          # toolset (v143) and SDK actually present on the hosted runner.
+          $sdk = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory |
+                  Where-Object { $_.Name -match '^10\.' } | Sort-Object Name)[-1].Name
+          Write-Host "Building with PlatformToolset=v143, WindowsTargetPlatformVersion=$sdk"
+          msbuild fancontrol.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=$sdk
 
       - name: Package
         shell: pwsh
