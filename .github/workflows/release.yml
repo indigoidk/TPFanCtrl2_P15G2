@@ -23,13 +23,20 @@ jobs:
       - name: Build (Release | Win32)
         shell: pwsh
         run: |
-          # See build.yml: override the dev's v145/SDK-26100 target to the
-          # toolset (v143) and SDK actually present on the hosted runner.
+          # See build.yml: build with the newest toolset + SDK installed on the
+          # runner (the project pins v145 for local builds).
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $toolset = 'v143'
+          try {
+            $mv = (Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object { [version]$_.Name })[-1].Name
+            if ([version]$mv -ge [version]'14.50') { $toolset = 'v145' }
+          } catch { }
           $sdk = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory |
                   Where-Object { $_.Name -match '^10\.' } | Sort-Object Name)[-1].Name
-          Write-Host "Building with PlatformToolset=v143, WindowsTargetPlatformVersion=$sdk"
+          Write-Host "Building with PlatformToolset=$toolset, WindowsTargetPlatformVersion=$sdk"
           msbuild fancontrol.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=Win32 `
-            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=$sdk
+            /p:PlatformToolset=$toolset /p:WindowsTargetPlatformVersion=$sdk
 
       - name: Package
         shell: pwsh

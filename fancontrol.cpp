@@ -1228,8 +1228,6 @@ FANCONTROL::BaseDlgProc(HWND
 // Bounded wait for the EC work thread; long enough to cover worst-case EC read
 // retries, short enough to never hang the UI thread on shutdown/close paths.
 #define THREAD_WAIT_TIMEOUT_MS 8000
-BOOL dioicon(TRUE);
-char obuf[256] = "";
 ULONG
 FANCONTROL::DlgProc(HWND
 	hwnd,
@@ -1240,6 +1238,7 @@ FANCONTROL::DlgProc(HWND
 {
 	ULONG rc = 0, ok, res;
 	char buf[1024];
+	char obuf[256] = "";   // scratch for trace/log messages built in this call
 
 	//	HANDLE hLockS = CreateMutex(NULL,FALSE,"TPFanControlMutex01");
 
@@ -1567,11 +1566,11 @@ FANCONTROL::DlgProc(HWND
 				{
 					this->pTaskbarIcon->SetIcon(icon);
 					this->CurrentIcon = icon;
-					if (dioicon && !this->NoBallons) {
+					if (this->m_showSymbolBalloon && !this->NoBallons) {
 						this->pTaskbarIcon->SetBalloon(NIIF_INFO, "TPFanControl v2.33 P15G2 Dual symbol icon",
 							"shows temperature level by color and state in tooltip, left click on icon shows or hides control window, right click shows menue",
 							11);
-						dioicon = FALSE;
+						this->m_showSymbolBalloon = false;
 					}
 
 				}
@@ -1579,90 +1578,8 @@ FANCONTROL::DlgProc(HWND
 			}
 			break;
 
-		case 3: // update vista icon
-		{
-		//*************************************************************************************
-		//begin named pipe client session
-		//
-			static char szBuffer[BUFFER_SIZE];
-			static DWORD cbBytes;
-			static BOOL bResult = FALSE;
-			static BOOL lbResult = FALSE;
-			static BOOL _piscreated = FALSE;
-			char str_value[256];
-
-			if (bResult == FALSE && lbResult == TRUE)
-			{
-				_piscreated = FALSE;
-				lbResult = FALSE;
-				bResult = FALSE;
-				for (int i = 0; i < ARRAYMAX(this->hPipe); i++)
-					CloseHandle(this->hPipe[i]);
-			}
-
-			if (_piscreated == FALSE)
-			{
-				for (int i = 0; i < ARRAYMAX(this->hPipe); i++)
-				{
-					this->hPipe[i] = CreateNamedPipe
-					(
-						g_szPipeName,             // pipe name
-						PIPE_ACCESS_OUTBOUND,     // write access
-						PIPE_TYPE_MESSAGE |       // message type pipe
-						PIPE_READMODE_MESSAGE |   // message-read mode
-						PIPE_NOWAIT,              // blocking mode
-						PIPE_UNLIMITED_INSTANCES, // max. instances
-						BUFFER_SIZE,              // output buffer size
-						BUFFER_SIZE,              // input buffer size
-						NMPWAIT_USE_DEFAULT_WAIT, // client time-out
-						NULL);                    // default security attribute
-
-					if (INVALID_HANDLE_VALUE == this->hPipe[i]) {
-						this->Trace("Creating Named Pipe client GUI was NOT successful.");
-						::PostMessage(this->hwndDialog, WM_COMMAND, 5020, 0);
-					}
-				}
-
-				_piscreated = TRUE;
-			}
-
-			// fan speed
-			if (Fahrenheit) {
-				if (fan1speed > 0x1fff)
-					fan1speed = lastfan1speed;
-				sprintf_s(str_value,
-					sizeof(str_value), "%d %d %s %d %d %d ",
-					this->CurrentMode, (this->MaxTemp * 9 / 5 + 32), this->gSensorNames[iMaxTemp],
-					iFarbeIconB, fan1speed, fanctrl2);
-			}
-			else {
-				if (fan1speed > 0x1fff)
-					fan1speed = lastfan1speed;
-				sprintf_s(str_value,
-					sizeof(str_value), "%d %d %s %d %d %d ",
-					this->CurrentMode, (this->MaxTemp), this->gSensorNames[iMaxTemp],
-					iFarbeIconB, fan1speed, fanctrl2);
-			}
-			strcpy_s(szBuffer, str_value); //write buffer
-
-			//send to client
-			lbResult = bResult;
-			for (int i = 0; i < ARRAYMAX(this->hPipe); i++)
-			{
-				bResult = WriteFile
-				(
-					this->hPipe[i],         // handle to pipe
-					szBuffer,             // buffer to write from
-					strlen(szBuffer) + 1,   // number of bytes to write, include the NULL
-					&cbBytes,             // number of bytes written
-					NULL);                // not overlapped I/O
-			}
-
-//end named pipe client session
-//
-//*************************************************************************************
+		case 3: // icon-refresh timer; the icon update itself runs below the switch
 			break;
-		}
 
 		case 4: // renew tempicon - force recreation; outer block calls ProcessTextIcons
 			if (ShowTempIcon && ReIcCycle)
@@ -2131,9 +2048,6 @@ FANCONTROL::WorkThread() {
 
 // The texticons will be shown depending on variables
 static const int MAX_TEXT_ICONS = 16;
-int icon, oldicon;
-BOOL dishow(TRUE);
-TCHAR myszTip[64];
 
 //-------------------------------------------------------------------------
 //  modal Settings dialog (resource 9300)
@@ -2323,6 +2237,10 @@ void FANCONTROL::ShowSettingsDialog()
 }
 
 void FANCONTROL::ProcessTextIcons(void) {
+	TCHAR myszTip[64];
+	int& icon    = this->m_textIcon;       // current text-icon color id (persists across calls)
+	int& oldicon = this->m_textIconPrev;   // previous id, for IconColorFan "keep last"
+
 	oldicon = icon;
 	if (this->CurrentModeFromDialog() == 1) {
 		icon = 10;    // gray
@@ -2390,15 +2308,15 @@ void FANCONTROL::ProcessTextIcons(void) {
 				this->hwndDialog, WM__TASKBAR, 0, "", "",  //WM_APP+5000 -> WM__TASKBAR
 				this->iFarbeIconB, this->iFontIconB, myszTip);
 
-			if (dishow && !this->NoBallons) {
+			if (this->m_showTextBalloon && !this->NoBallons) {
 				if (Fahrenheit) {
 					ppTbTextIcon[0]->DiShowballon(
-						_T("shows max. temperature in � F and sensor name, left click on icon shows or hides control window, right click shows menue"),
+						_T("shows max. temperature in \xb0 F and sensor name, left click on icon shows or hides control window, right click shows menue"),
 						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11);
 				}
 				else {
 					ppTbTextIcon[0]->DiShowballon(
-						_T("shows max. temperature in � C and sensor name, left click on icon shows or hides control window, right click shows menue"),
+						_T("shows max. temperature in \xb0 C and sensor name, left click on icon shows or hides control window, right click shows menue"),
 						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11);
 				}
 
@@ -2415,7 +2333,7 @@ void FANCONTROL::ProcessTextIcons(void) {
 				//            be between 10 and 30 inclusive.
 				//
 
-				dishow = FALSE;
+				this->m_showTextBalloon = false;
 			}
 		}
 

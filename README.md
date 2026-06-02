@@ -90,6 +90,17 @@ Highlights:
 
 ## Changelog
 
+### v2.33.3
+
+- Removed the unused named-pipe broadcast (8 pipes were created and written
+  every icon cycle with no consumer) — less per-cycle work and complexity.
+- Fixed a corrupted `°` character in the tray balloon tooltips.
+- Moved the dialog's file-scope scratch globals (`obuf`, `icon`, balloon
+  one-shot flags, tooltip buffer) to locals/members — no reentrancy-fragile
+  global state.
+- CI now builds with the newest toolset installed on the runner instead of a
+  pinned version.
+
 ### v2.33.2
 
 - Docs: the full changelog is now shown on the project page **and** mirrored

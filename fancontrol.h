@@ -37,14 +37,6 @@
 #define ARRAYMAX(tab) (sizeof(tab)/sizeof((tab)[0]))
 #define NULLSTRUCT    { 0, }
 
-//begin named pipe TPFanControl01
-#define g_szPipeName "\\\\.\\Pipe\\TPFanControl01"  //Name given to the pipe
-//Pipe name format - \\.\pipe\pipename
-
-#define BUFFER_SIZE 1024 //1k
-#define ACK_MESG_RECV "Message received successfully"
-//end named pipe TPFanControl01
-
 class FANCONTROL {
 protected:
 	HINSTANCE hinstapp;
@@ -94,6 +86,11 @@ protected:
 	int IconLevels[3];    // temp levels for coloring the icon
 	int FIconLevels[3];    // fahrenheit temp levels for coloring the icon
 	int CurrentIcon;
+	// tray text-icon state (was file-scope globals)
+	int m_textIcon = 0;            // current text-icon color id
+	int m_textIconPrev = 0;        // previous id, for IconColorFan "keep last"
+	bool m_showSymbolBalloon = true;   // show the symbol-icon intro balloon once
+	bool m_showTextBalloon = true;     // show the text-icon intro balloon once
 	int IndSmartLevel;
 	int FSensorOffset[16];
 	int iFarbeIconB;
@@ -165,7 +162,6 @@ protected:
 	char MenuLabelSM1[32];
 	char MenuLabelSM2[32];
 	HANDLE hThread;
-	HANDLE hPipe[8];
 	HANDLE hLock;
 	HANDLE hLockS;
 	BOOL Closing;
