@@ -90,6 +90,13 @@ Highlights:
 
 ## Changelog
 
+### v2.33.2
+
+- Docs: the full changelog is now shown on the project page **and** mirrored
+  into the GitHub Release notes automatically.
+- Repackaged zip carries the updated README. No functional code changes
+  since v2.33.1.
+
 ### v2.33.1
 
 **Performance**
