@@ -102,12 +102,15 @@ DWORD InstallService(bool quiet) {
 
     char ExePath[MAX_PATH];
     GetModuleFileName(NULL, ExePath, sizeof(ExePath));
-	sprintf_s(ExePath+strlen(ExePath),sizeof(ExePath)-strlen(ExePath)," -s");
-//	sprintf_s(ExePath,sizeof(ExePath)," -s");
+    // Quote the executable path so SCM parses it as a single token. Without the
+    // quotes, an install path containing spaces breaks service startup and is a
+    // classic unquoted-service-path weakness.
+    char CmdLine[MAX_PATH + 8];
+    sprintf_s(CmdLine, sizeof(CmdLine), "\"%s\" -s", ExePath);
 
     SC_HANDLE svc = CreateService(SCMgr, g_ServiceName, g_ServiceName, SERVICE_ALL_ACCESS,
-        SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, 
-        ExePath, NULL, NULL, NULL, NULL, NULL);
+        SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
+        CmdLine, NULL, NULL, NULL, NULL, NULL);
 
     if (!svc) {
         CloseServiceHandle(SCMgr);
@@ -185,8 +188,16 @@ VOID WINAPI ServiceMain(DWORD aArgc, LPTSTR* aArgv) {
     g_SvcStatus.dwWaitHint = 0;
     SetServiceStatus(g_SvcHandle, &g_SvcStatus);
 
-    StartWorkerThread();
-    
+    if (!StartWorkerThread()) {
+        // could not create the stop event or worker thread: report a clean
+        // failure to the SCM instead of sitting in a half-started state
+        g_SvcStatus.dwCurrentState = SERVICE_STOPPED;
+        g_SvcStatus.dwWin32ExitCode = ERROR_SERVICE_SPECIFIC_ERROR;
+        g_SvcStatus.dwServiceSpecificExitCode = 1;
+        SetServiceStatus(g_SvcHandle, &g_SvcStatus);
+        return;
+    }
+
     g_SvcStatus.dwCurrentState = SERVICE_RUNNING;
     SetServiceStatus(g_SvcHandle, &g_SvcStatus);
 
@@ -199,8 +210,16 @@ VOID WINAPI Handler(DWORD fdwControl) {
         g_SvcStatus.dwCurrentState = SERVICE_STOP_PENDING;
         SetServiceStatus(g_SvcHandle, &g_SvcStatus);
 
-        StopWorkerThread();
-                
+        if (StopWorkerThread()) {
+            g_SvcStatus.dwWin32ExitCode = NO_ERROR;
+            g_SvcStatus.dwServiceSpecificExitCode = 0;
+        }
+        else {
+            // worker did not stop: report a stop failure rather than claim a
+            // clean STOPPED while it is still running EC/UI code
+            g_SvcStatus.dwWin32ExitCode = ERROR_SERVICE_SPECIFIC_ERROR;
+            g_SvcStatus.dwServiceSpecificExitCode = 2;
+        }
         g_SvcStatus.dwCurrentState = SERVICE_STOPPED;
         SetServiceStatus(g_SvcHandle, &g_SvcStatus);
 
@@ -211,14 +230,63 @@ VOID WINAPI Handler(DWORD fdwControl) {
     }
 }
 
-void StartWorkerThread() {
-    g_workerThread = (HANDLE)_beginthread(WorkerThread, 0, NULL);
+// _beginthreadex trampoline: unlike _beginthread, the returned handle stays
+// valid until we CloseHandle it, so service stop can wait on it safely.
+static unsigned __stdcall WorkerThreadTramp(void* p) {
+    WorkerThread(p);
+    return 0;
 }
 
-void StopWorkerThread() {
-    ::PostMessage(g_dialogWnd, WM_COMMAND, 5020, 0);
-	::WaitForSingleObject(g_workerThread, INFINITE);
-	// Note: do NOT CloseHandle here — _beginthread auto-closes its handle on thread exit
+bool StartWorkerThread() {
+    if (!g_stopEvent) {
+        g_stopEvent = ::CreateEvent(NULL, TRUE, FALSE, NULL);   // manual-reset
+        if (!g_stopEvent) {
+            debug("StartWorkerThread: CreateEvent failed\r\n");
+            return false;
+        }
+    }
+    g_workerThread = (HANDLE)_beginthreadex(NULL, 0, WorkerThreadTramp, NULL, 0, NULL);
+    if (!g_workerThread) {
+        debug("StartWorkerThread: _beginthreadex failed\r\n");
+        ::CloseHandle(g_stopEvent);
+        g_stopEvent = NULL;
+        return false;
+    }
+    return true;
+}
+
+// Returns true only if the worker actually exited. On a timeout the worker is
+// still running EC/UI code, so we must NOT close its handle or let the caller
+// report the service as cleanly stopped.
+bool StopWorkerThread() {
+    // Abort the startup OpenTVicPort retry if we are still in it (g_dialogWnd not
+    // yet set), so a stop arriving during boot doesn't hang on the wait below.
+    if (g_stopEvent)
+        ::SetEvent(g_stopEvent);
+
+    // Ask the UI to close cleanly only if the window actually exists yet.
+    if (g_dialogWnd && ::IsWindow(g_dialogWnd))
+        ::PostMessage(g_dialogWnd, WM_COMMAND, 5020, 0);
+
+    bool stopped = true;
+    if (g_workerThread) {
+        // Bounded wait so service stop can never hang forever.
+        if (::WaitForSingleObject(g_workerThread, 15000) == WAIT_OBJECT_0) {
+            ::CloseHandle(g_workerThread);   // _beginthreadex handle is owned by us
+            g_workerThread = NULL;
+        }
+        else {
+            debug("StopWorkerThread: worker did not exit within 15s\r\n");
+            stopped = false;                 // leave the handle: thread still alive
+        }
+    }
+
+    // only release the stop event once the worker (which may read it) is gone
+    if (stopped && g_stopEvent) {
+        ::CloseHandle(g_stopEvent);
+        g_stopEvent = NULL;
+    }
+    return stopped;
 }
 
 void WorkerThread(void *dummy) {
@@ -257,7 +325,12 @@ void WorkerThread(void *dummy) {
             ok = true;
             break;
         }
-        ::Sleep(1000);
+        // wait 1s, but abort immediately if a service stop was requested while
+        // we are still trying to open the port (before the dialog window exists)
+        if (g_stopEvent && ::WaitForSingleObject(g_stopEvent, 1000) == WAIT_OBJECT_0)
+            break;
+        if (!g_stopEvent)
+            ::Sleep(1000);
     }
 	if (ok) {	
 		HardAccess = TestHardAccess();
@@ -271,7 +344,10 @@ void WorkerThread(void *dummy) {
 
 		fc.ProcessDialog();
 
-		::PostMessage(g_dialogWnd, WM_COMMAND, 5020, 0);
+		// the dialog loop has exited; clear the shared handle before fc's
+		// destructor tears the window down so a concurrent service stop can't
+		// post to a window that is about to be (or already) destroyed
+		g_dialogWnd = NULL;
 		CloseTVicPort();
 	}
 	else {

@@ -133,15 +133,13 @@ FANCONTROL::SaveConfig(const char* configfile)
 	fclose(fin);
 	fclose(fout);
 
-	// replace the original with the rewritten copy
-	if (remove(configfile) == 0) {
-		if (rename(tmpname, configfile) != 0)
-			this->Trace("SaveConfig: rename of temp ini failed");
-		else
-			this->Trace("Settings saved to TPFanControl.ini");
-	}
+	// atomically replace the original with the rewritten copy. Unlike
+	// remove()+rename(), this never leaves a window where the ini is missing,
+	// and on failure the user's original config is left fully intact.
+	if (::MoveFileExA(tmpname, configfile, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+		this->Trace("Settings saved to TPFanControl.ini");
 	else {
-		this->Trace("SaveConfig: could not replace ini");
+		this->Trace("SaveConfig: could not replace ini (original kept)");
 		remove(tmpname);
 	}
 }
@@ -267,15 +265,21 @@ FANCONTROL::ReadConfig(const char* configfile)
 			}
 
 			if (_strnicmp(buf, "level=", 6) == 0) {
-				sscanf_s(buf + 6, "%d %d %d %d", &this->SmartLevels[lcnt1].temp, &this->SmartLevels[lcnt1].fan, &this->SmartLevels[lcnt1].hystUp, &this->SmartLevels[lcnt1].hystDown);
-				sscanf_s(buf + 6, "%d %d %d %d", &this->SmartLevels1[lcnt1].temp1, &this->SmartLevels1[lcnt1].fan1, &this->SmartLevels1[lcnt1].hystUp1, &this->SmartLevels1[lcnt1].hystDown1);
-				lcnt1++;
+				// cap at array size - 1: the loop writes a -1 terminator at
+				// SmartLevels[lcnt1] afterwards, so that slot must stay free.
+				if (lcnt1 < (int)ARRAYMAX(this->SmartLevels) - 1) {
+					sscanf_s(buf + 6, "%d %d %d %d", &this->SmartLevels[lcnt1].temp, &this->SmartLevels[lcnt1].fan, &this->SmartLevels[lcnt1].hystUp, &this->SmartLevels[lcnt1].hystDown);
+					sscanf_s(buf + 6, "%d %d %d %d", &this->SmartLevels1[lcnt1].temp1, &this->SmartLevels1[lcnt1].fan1, &this->SmartLevels1[lcnt1].hystUp1, &this->SmartLevels1[lcnt1].hystDown1);
+					lcnt1++;
+				}
 				continue;
 			}
 
 			if (_strnicmp(buf, "level2=", 7) == 0) {
-				sscanf_s(buf + 7, "%d %d %d %d", &this->SmartLevels2[lcnt2].temp2, &this->SmartLevels2[lcnt2].fan2, &this->SmartLevels2[lcnt2].hystUp2, &this->SmartLevels2[lcnt2].hystDown2);
-				lcnt2++;
+				if (lcnt2 < (int)ARRAYMAX(this->SmartLevels2) - 1) {
+					sscanf_s(buf + 7, "%d %d %d %d", &this->SmartLevels2[lcnt2].temp2, &this->SmartLevels2[lcnt2].fan2, &this->SmartLevels2[lcnt2].hystUp2, &this->SmartLevels2[lcnt2].hystDown2);
+					lcnt2++;
+				}
 				continue;
 			}
 

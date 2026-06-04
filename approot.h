@@ -15,6 +15,7 @@ SERVICE_STATUS g_SvcStatus = { 0 };
 SERVICE_STATUS_HANDLE g_SvcHandle = NULL;
 HWND g_dialogWnd = NULL;
 HANDLE g_workerThread = NULL;
+HANDLE g_stopEvent = NULL;   // signalled on service stop to abort the startup retry
 
 void ShowError(DWORD ec, const char* description);
 
@@ -35,9 +36,9 @@ ServiceMain(DWORD
 	LPTSTR* aArgv
 );
 
-void StartWorkerThread();
+bool StartWorkerThread();
 
-void StopWorkerThread();
+bool StopWorkerThread();
 
 void WorkerThread(void* dummy);
 

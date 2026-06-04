@@ -252,6 +252,12 @@ protected:
 
 	int HandleData();
 
+	// apply SensorOffset to a raw sensor reading when ShowBiasedTemps is on,
+	// honoring the per-sensor hysteresis window (offset disabled inside it).
+	// State.Sensors always holds raw EC values; this is the single place bias
+	// is computed, so display and fan-control decisions stay consistent.
+	int BiasedTemp(int rawTemp, int sensorIndex) const;
+
 	void SmartControl();
 
 	void TraceModeChange();   // log "Change Mode from <prev>-><cur>" (no-op if unchanged)

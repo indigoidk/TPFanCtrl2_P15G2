@@ -442,7 +442,10 @@ FANCONTROL::~FANCONTROL() {
 	}
 
 	if (this->hThread) {
-		::WaitForSingleObject(this->hThread, 2000);
+		// close the handle only after a confirmed clean exit; on timeout we leak
+		// the handle rather than risk closing one still in use by a live thread
+		if (::WaitForSingleObject(this->hThread, 2000) == WAIT_OBJECT_0)
+			::CloseHandle(this->hThread);
 		this->hThread = NULL;
 	}
 
@@ -739,13 +742,28 @@ FANCONTROL::ToggleGameMode(bool silent) {
 	bool ok = true;
 	if (!this->m_driversHidden) {
 		// Hide: rename .sys -> .sys.bak, replacing any stale .bak from a prior manual rename
+		bool moved[2] = { false, false };   // track successes for rollback
 		for (int i = 0; i < 2; i++) {
 			char bak[MAX_PATH];
 			strcpy_s(bak, sizeof(bak), sys[i]);
 			strcat_s(bak, sizeof(bak), ".bak");
-			if (::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES)
+			if (::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES) {
 				if (!::MoveFileExA(sys[i], bak, MOVEFILE_REPLACE_EXISTING))
 					{ lastErr = ::GetLastError(); ok = false; break; }
+				moved[i] = true;
+			}
+		}
+		if (!ok) {
+			// partial failure: undo the renames that did succeed so we never
+			// leave one driver hidden with m_driversHidden=false (which would
+			// skip restoration in the destructor / on the next toggle)
+			for (int i = 0; i < 2; i++) {
+				if (!moved[i]) continue;
+				char bak[MAX_PATH];
+				strcpy_s(bak, sizeof(bak), sys[i]);
+				strcat_s(bak, sizeof(bak), ".bak");
+				::MoveFileExA(bak, sys[i], MOVEFILE_REPLACE_EXISTING);
+			}
 		}
 		if (ok) {
 			this->m_driversHidden = true;
@@ -818,8 +836,9 @@ FANCONTROL::UpdateTempList() {
 		this->Fahrenheit ? 1 : 0, this->ShowAll);
 
 	for (int i = 0; i < 12; i++) {
-		int temp = this->State.Sensors[i];
-		bool valid = (temp != 0 && temp < 128);
+		int raw = this->State.Sensors[i];
+		bool valid = (raw != 0 && raw < 128);
+		int temp = this->BiasedTemp(raw, i);   // display/color use the biased value
 
 		if (!valid && this->ShowAll != 1)
 			continue;
@@ -1615,7 +1634,7 @@ FANCONTROL::DlgProc(HWND
 			{
 				this->ShowAllFromDialog();
 				this->UpdateTempList();
-				this->icontemp = this->State.Sensors[this->iMaxTemp];
+				this->icontemp = this->BiasedTemp(this->State.Sensors[this->iMaxTemp], this->iMaxTemp);
 			}
 			//end temp display
 
@@ -1694,10 +1713,12 @@ FANCONTROL::DlgProc(HWND
 					::SetForegroundWindow(this->hwndDialog);
 					break;
 
-				case 5070: // show temp icon
+				case 5070: // switch to classic colored symbol icon
 					this->ShowTempIcon = 0;
-					this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.33 P15G2 Dual");
-					this->pTaskbarIcon->SetIcon(this->CurrentIcon);
+					if (!this->pTaskbarIcon) {   // guard: don't leak an existing icon
+						this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.33 P15G2 Dual");
+						this->pTaskbarIcon->SetIcon(this->CurrentIcon);
+					}
 					break;
 
 				case 5080: // show temp icon
@@ -1800,35 +1821,41 @@ FANCONTROL::DlgProc(HWND
 				this->ToggleGameMode(true);   // silent: no modal dialog can stall shutdown
 
 			// end program
-			// Wait for the work thread to terminate
-			if (this->hThread) {
-				::WaitForSingleObject(this->hThread, THREAD_WAIT_TIMEOUT_MS);
-			}
-			if (!this->EcAccess.Lock(100))
-			{
-				// Something is going on, let's do this later
-				this->Trace("Delaying close");
-				m_needClose = true;
-				break;
-			}
+			// Wait for the work thread to terminate (capture the result: we must
+			// not close a handle to a thread that is still alive)
+			DWORD waitrc = WAIT_OBJECT_0;
+			if (this->hThread)
+				waitrc = ::WaitForSingleObject(this->hThread, THREAD_WAIT_TIMEOUT_MS);
 
-			// don't close if we can't set the fan back to bios controlled
-			if (!this->ActiveMode || this->SetFan("On close", 0x80, true)) {
-				::KillTimer(this->hwndDialog, m_fanTimer);
-				::KillTimer(this->hwndDialog, m_titleTimer);
-				::KillTimer(this->hwndDialog, m_iconTimer);
-				::KillTimer(this->hwndDialog, m_renewTimer);
-				BOOL CloHT = CloseHandle(this->hThread); this->hThread = NULL;  // avoid stale/double-close in dtor & WM__NEWDATA
-				// BOOL CloHM=CloseHandle(this->hLock);
-				// BOOL CloHS=CloseHandle(this->hLockS);
-				this->Trace("Exiting ProcessDialog");
-				::PostMessage(hwnd, WM__DISMISSDLG, IDCANCEL, 0); // exit from ProcessDialog()
+			// Shutdown path: the process may be terminated as soon as we return,
+			// so restore BIOS fan control *synchronously* here. Do NOT defer via
+			// m_needClose (unlike the interactive close) — the deferred close
+			// depends on future UI messages that may never be delivered during
+			// shutdown. SetFan locks the EC itself (reentrant mutex) with its own
+			// bounded retry and traces its own OK/FAILED result; best-effort, and
+			// won't hang shutdown.
+			if (this->ActiveMode)
+				this->SetFan("On shutdown", 0x80, true);
+
+			::KillTimer(this->hwndDialog, m_fanTimer);
+			::KillTimer(this->hwndDialog, m_titleTimer);
+			::KillTimer(this->hwndDialog, m_iconTimer);
+			::KillTimer(this->hwndDialog, m_renewTimer);
+
+			// Close the handle only if the worker actually exited. On timeout the
+			// worker is still alive (likely wedged in EC retries); leave the handle
+			// (the process is terminating anyway) rather than close a live handle.
+			// We still dismiss: a late PostMessage from the worker to the soon-to-be
+			// destroyed window just fails harmlessly once the message loop stops.
+			if (this->hThread && waitrc == WAIT_OBJECT_0) {
+				CloseHandle(this->hThread);
+				this->hThread = NULL;
 			}
-			else
-			{
-				m_needClose = true;
+			else if (waitrc != WAIT_OBJECT_0) {
+				this->Trace("On shutdown: work thread did not exit in time; closing anyway");
 			}
-			this->EcAccess.Unlock();
+			this->Trace("Exiting ProcessDialog");
+			::PostMessage(hwnd, WM__DISMISSDLG, IDCANCEL, 0); // exit from ProcessDialog()
 		}
 		break;
 
@@ -1872,8 +1899,10 @@ FANCONTROL::DlgProc(HWND
 				this->hThread = 0;
 			}
 			else {
+				// worker still alive: do NOT clear/close the handle here, or the
+				// shutdown handler below can't wait on it. Leave it intact and let
+				// WM_ENDSESSION gate the close on its own WAIT_OBJECT_0 check.
 				this->Trace("Work thread did not finish in time, closing to BIOS mode");
-				this->hThread = 0;
 				::SendMessage(this->hwndDialog, WM_ENDSESSION, 0, 0);
 			}
 		}
@@ -2304,7 +2333,7 @@ void FANCONTROL::ProcessTextIcons(void) {
 
 	this->iFarbeIconB = icon;
 
-	lstrcpyn(myszTip, this->Title2, sizeof(myszTip) - 1);
+	lstrcpyn(myszTip, this->Title2, _countof(myszTip));   // count is in TCHARs, not bytes
 
 	if (pTextIconMutex->Lock(100)) {
 		//INIT ppTbTextIcon

@@ -51,6 +51,25 @@ FANCONTROL::TraceModeChange() {
 }
 
 //-------------------------------------------------------------------------
+//  apply the per-sensor offset to a raw reading (hysteresis-aware).
+//  Returns the raw value unchanged when ShowBiasedTemps is off or the
+//  reading falls inside the sensor's hyst exclusion window.
+//-------------------------------------------------------------------------
+int
+FANCONTROL::BiasedTemp(int rawTemp, int sensorIndex) const {
+	if (!this->ShowBiasedTemps)
+		return rawTemp;
+
+	int offs = this->SensorOffset[sensorIndex].offs;
+	// inside the exclusion window the offset is disabled (compare on real temp)
+	if (rawTemp >= this->SensorOffset[sensorIndex].hystMin &&
+		rawTemp <= this->SensorOffset[sensorIndex].hystMax)
+		offs = 0;
+
+	return rawTemp - offs;
+}
+
+//-------------------------------------------------------------------------
 //  switch fan according to settings
 //-------------------------------------------------------------------------
 int
@@ -70,6 +89,10 @@ FANCONTROL::HandleData(void) {
 		if (list[i] == ',')
 			list[i] = '|';
 	}
+	// sensor names are stored uppercase (CPU, GPU, ...), but the ini tells users
+	// to enter IgnoreSensors in lower case. Uppercase the list so the match is
+	// effectively case-insensitive and "pci,aps" actually ignores PCI/APS.
+	_strupr_s(list, sizeof(list));
 
 	maxtemp = 0;
 	imaxtemp = 0;
@@ -78,17 +101,7 @@ FANCONTROL::HandleData(void) {
 		sprintf_s(what, sizeof(what), "|%s|", this->State.SensorName[i]); // name (e.g. "|CPU|") to match against list above
 
 		if (this->State.Sensors[i] != 0x80 && this->State.Sensors[i] != 0x00 && strstr(list, what) == 0) {
-			int isens = this->State.Sensors[i];
-			int ioffs = this->SensorOffset[i].offs;
-
-			// zero out offset when sensor reads within the hysteresis exclusion range
-			if (isens >= SensorOffset[i].hystMin && isens <= SensorOffset[i].hystMax)
-				ioffs = 0;
-
-			if (ShowBiasedTemps)
-				senstemp = isens - ioffs;
-			else
-				senstemp = isens;
+			senstemp = this->BiasedTemp(this->State.Sensors[i], i);
 
 			if (senstemp < 128) {
 				maxtemp = __max(senstemp, maxtemp);
@@ -182,33 +195,23 @@ FANCONTROL::HandleData(void) {
 
 	this->UpdateTempList();
 
-	this->icontemp = this->State.Sensors[iMaxTemp];
+	this->icontemp = this->BiasedTemp(this->State.Sensors[iMaxTemp], iMaxTemp);
 
-	// compact single line status (combined)
+	// compact single line status (combined). Use the same <128 validity test
+	// and BiasedTemp() in both unit branches so the line matches MaxTemp/the list.
 	strcpy_s(templist, sizeof(templist), "");
 
-	if (Fahrenheit) {
-		for (i = 0; i < 12; i++) {
-			if (this->State.Sensors[i] < 128) {
-				if (this->State.Sensors[i] != 0)
-					sprintf_s(templist + strlen(templist), sizeof(templist) - strlen(templist), "%d;", this->State.Sensors[i] * 9 / 5 + 32);
-				else
-					sprintf_s(templist + strlen(templist), sizeof(templist) - strlen(templist), "%d;", 0);
-			}
-			else {
-				strcat_s(templist, sizeof(templist), "0;");
-			}
+	for (i = 0; i < 12; i++) {
+		int raw = this->State.Sensors[i];
+		const char* sep = Fahrenheit ? "%d;" : "%d; ";
+		if (raw >= 128 || raw == 0) {
+			sprintf_s(templist + strlen(templist), sizeof(templist) - strlen(templist), sep, 0);
+			continue;
 		}
-	}
-	else {
-		for (i = 0; i < 12; i++) {
-			if (this->State.Sensors[i] != 128) {
-				sprintf_s(templist + strlen(templist), sizeof(templist) - strlen(templist), "%d; ", this->State.Sensors[i]);
-			}
-			else {
-				strcat_s(templist, sizeof(templist), "0; ");
-			}
-		}
+		int t = this->BiasedTemp(raw, i);
+		if (Fahrenheit)
+			t = t * 9 / 5 + 32;
+		sprintf_s(templist + strlen(templist), sizeof(templist) - strlen(templist), sep, t);
 	}
 
 	if (templist[0])
@@ -387,14 +390,15 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 		// correct read-back) but cap retries/backoff so a failing EC can't freeze
 		// the UI thread for ~3.5s. Worst case now ~1.5s.
 		for (int i = 0; i < 3; i++) {
-			// set new fan level
-			ok = this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
-			ok = this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
+			// set new fan level; AND every write so a port failure is not masked
+			bool write_ok = true;
+			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
+			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
 
 			::Sleep(100);
 
-			ok = this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN2);
-			ok = this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
+			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN2);
+			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
 
 			::Sleep(100);
 
@@ -404,17 +408,19 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 			::Sleep(100);
 
 			// verify completion of fan1
-			ok = this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
-			//ok = this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
+			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
 
 			::Sleep(100);
 
 			fan1_ok = this->ReadByteFromEC(TP_ECOFFSET_FAN, &this->State.FanCtrl);
 
-			if (fan1_ok && fan2_ok) {
+			if (write_ok && fan1_ok && fan2_ok) {
 				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "[i=%d] ", i);
 				break;
 			}
+
+			if (!write_ok)
+				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "[wr-fail i=%d] ", i);
 
 			if (i < 2) ::Sleep(150);   // brief backoff before retry (skipped after last attempt)
 		}
@@ -664,11 +670,9 @@ FANCONTROL::ReadEcRaw(FCSTATE* pfcstate) {
 
 			pfcstate->SensorName[idxtemp] = this->gSensorNames[idxtemp];
 
-			if (ReadByteFromEC(TP_ECOFFSET_TEMP0 + i, &pfcstate->Sensors[idxtemp])) {
-				if (this->ShowBiasedTemps)
-					pfcstate->Sensors[idxtemp] = pfcstate->Sensors[idxtemp] - this->SensorOffset[idxtemp].offs;
-			}
-			else {
+			// store the raw EC reading; bias (if any) is applied later via
+			// BiasedTemp() so display and fan decisions stay consistent.
+			if (!ReadByteFromEC(TP_ECOFFSET_TEMP0 + i, &pfcstate->Sensors[idxtemp])) {
 				this->Trace("failed to read a TEMP0 byte from EC");
 				return false;
 			}
@@ -684,11 +688,8 @@ FANCONTROL::ReadEcRaw(FCSTATE* pfcstate) {
 			if (!this->NoExtSensor) {
 				pfcstate->SensorName[idxtemp] = this->gSensorNames[idxtemp];
 
-				if (ReadByteFromEC(TP_ECOFFSET_TEMP1 + i, &pfcstate->Sensors[idxtemp])) {
-					if (this->ShowBiasedTemps)
-						pfcstate->Sensors[idxtemp] = pfcstate->Sensors[idxtemp] - this->SensorOffset[idxtemp].offs;
-				}
-				else {
+				// store the raw reading; bias applied later via BiasedTemp()
+				if (!ReadByteFromEC(TP_ECOFFSET_TEMP1 + i, &pfcstate->Sensors[idxtemp])) {
 					this->Trace("failed to read a TEMP1 byte from EC");
 					return false;
 				}

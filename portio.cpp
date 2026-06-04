@@ -103,10 +103,18 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 	WritePort(this->EC_DATA, offset);
 
 	// wait for IBF to clear (address byte removed from EC's input queue)
-	// Note: Techically we should also waitforflags(OBF,TRUE) here,
-	// (a byte being in the EC's output buffer being ready to read).
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {
 		this->Trace("readec: timed out #3");
+		return false;
+	}
+
+	// wait for OBF=TRUE: the result byte must actually be in the EC's output
+	// buffer before we read it, otherwise we latch a stale/previous value and
+	// can drive a wrong fan decision. Short timeout (100ms) so a misbehaving EC
+	// fails fast into the caller's retry / BIOS-fallback path instead of hanging;
+	// a healthy EC has OBF set already and returns immediately.
+	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_OBF, true, 100)) {
+		this->Trace("readec: timed out #4 (OBF)");
 		return false;
 	}
 
