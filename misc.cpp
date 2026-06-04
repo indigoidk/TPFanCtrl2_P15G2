@@ -145,6 +145,82 @@ FANCONTROL::SaveConfig(const char* configfile)
 }
 
 //-------------------------------------------------------------------------
+//  persist only the WindowPos= line (called on exit). Captures the current
+//  restored rect first, then atomically rewrites that single key, leaving every
+//  other setting and all comments untouched.
+//-------------------------------------------------------------------------
+void
+FANCONTROL::SaveWindowPos(const char* configfile) {
+	if (!this->hwndDialog)
+		return;
+
+	WINDOWPLACEMENT wp = NULLSTRUCT;
+	wp.length = sizeof(wp);
+	if (!::GetWindowPlacement(this->hwndDialog, &wp))
+		return;
+	const RECT& r = wp.rcNormalPosition;   // restored rect, even if currently minimized
+	this->WinX = r.left;
+	this->WinY = r.top;
+	this->WinW = r.right - r.left;
+	this->WinH = r.bottom - r.top;
+	if (this->WinW <= 0 || this->WinH <= 0)
+		return;
+
+	FILE* fin = NULL;
+	if (fopen_s(&fin, configfile, "r") != 0 || !fin)
+		return;
+	char tmpname[MAX_PATH];
+	sprintf_s(tmpname, sizeof(tmpname), "%s.tmp", configfile);
+	FILE* fout = NULL;
+	if (fopen_s(&fout, tmpname, "w") != 0 || !fout) {
+		fclose(fin);
+		return;
+	}
+
+	char buf[1024];
+	bool done = false;
+	while (fgets(buf, sizeof(buf), fin)) {
+		char* s = buf;
+		while (*s == ' ' || *s == '\t') s++;
+		if (!done && _strnicmp(s, "WindowPos=", 10) == 0) {
+			fprintf(fout, "WindowPos=%d %d %d %d\r\n", this->WinX, this->WinY, this->WinW, this->WinH);
+			done = true;
+		}
+		else {
+			fputs(buf, fout);
+		}
+	}
+	if (!done)
+		fprintf(fout, "WindowPos=%d %d %d %d\r\n", this->WinX, this->WinY, this->WinW, this->WinH);
+
+	fclose(fin);
+	fclose(fout);
+	::MoveFileExA(tmpname, configfile, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
+//-------------------------------------------------------------------------
+//  apply a saved window rect, but only if it is still visible on some monitor
+//  (guards against a position left off-screen by an unplugged display).
+//-------------------------------------------------------------------------
+void
+FANCONTROL::RestoreWindowPos() {
+	if (!this->hwndDialog || this->WinW <= 0 || this->WinH <= 0)
+		return;
+
+	RECT r = { this->WinX, this->WinY, this->WinX + this->WinW, this->WinY + this->WinH };
+	HMONITOR hMon = ::MonitorFromRect(&r, MONITOR_DEFAULTTONULL);
+	if (!hMon)
+		return;   // saved rect lies entirely off all current monitors -> ignore it
+
+	// Restore size only for the resizable full dialog; the slim dialogs have a
+	// fixed frame, so a size saved in the other mode must not be forced on them.
+	UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
+	if (this->SlimDialog == 1)
+		flags |= SWP_NOSIZE;
+	::SetWindowPos(this->hwndDialog, NULL, r.left, r.top, this->WinW, this->WinH, flags);
+}
+
+//-------------------------------------------------------------------------
 //  read config file
 //-------------------------------------------------------------------------
 int
@@ -457,6 +533,14 @@ FANCONTROL::ReadConfig(const char* configfile)
 
 			if (_strnicmp(buf, "ShowGraph=", 10) == 0) {
 				this->ShowGraph = atoi(buf + 10);
+				continue;
+			}
+
+			// last main-window placement: "WindowPos=x y w h" (restored rect).
+			// Applied after the dialog is created (see RestoreWindowPos).
+			if (_strnicmp(buf, "WindowPos=", 10) == 0) {
+				sscanf_s(buf + 10, "%d %d %d %d",
+					&this->WinX, &this->WinY, &this->WinW, &this->WinH);
 				continue;
 			}
 

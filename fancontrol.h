@@ -158,6 +158,9 @@ protected:
 	int ShowLog;       // show the Log box
 	int DarkMode;      // dark theme
 	int ShowGraph;     // show the temperature history sparkline (control 8120)
+	// last main-window position/size (restored rect), persisted across runs via the
+	// WindowPos= ini line. WinW <= 0 means "not saved yet" -> let the OS place it.
+	int WinX = 0, WinY = 0, WinW = 0, WinH = 0;
 	char IgnoreSensors[256];
 	char MenuLabelSM1[32];
 	char MenuLabelSM2[32];
@@ -272,6 +275,10 @@ protected:
 
 	LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam);
 
+	// register one balloon tooltip on a main-dialog control (no-op if the tip
+	// window or control is missing). m_hwndTip is created once on first use.
+	void AddTip(int ctrlId, const char* text);
+
 	// for detecting lid closing
 	HPOWERNOTIFY hPowerNotify;
 	bool isLidClosed = false;
@@ -280,6 +287,12 @@ protected:
 	int ReadConfig(const char* filename);
 
 	void SaveConfig(const char* filename);   // rewrite known keys in-place, preserving comments
+
+	// window-position memory: capture the current restored rect and rewrite only the
+	// WindowPos= ini line (isolated from SaveConfig so exit doesn't persist other
+	// runtime toggles); RestoreWindowPos applies a saved rect if it lands on-screen.
+	void SaveWindowPos(const char* filename);
+	void RestoreWindowPos();
 
 	void Trace(const char* text);
 

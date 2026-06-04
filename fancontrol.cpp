@@ -259,28 +259,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 		::SetDlgItemText(this->hwndDialog, 8310, buf);
 		this->hPowerNotify = RegisterPowerSettingNotification(this->hwndDialog, &GUID_LIDSWITCH_STATE_CHANGE, DEVICE_NOTIFY_WINDOW_HANDLE);
 		this->InitThemeAndChrome();
-
-		// Balloon tooltip on "Game mode (Hide Drivers)" checkbox
-		HWND hwndGM = ::GetDlgItem(this->hwndDialog, 7013);
-		if (hwndGM) {
-			this->m_hwndTip = ::CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
-				WS_POPUP | TTS_ALWAYSTIP | TTS_BALLOON,
-				CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-				this->hwndDialog, NULL, this->hinstapp, NULL);
-			if (this->m_hwndTip) {
-				::SendMessage(this->m_hwndTip, TTM_SETMAXTIPWIDTH, 0, 320);
-				TOOLINFO ti = {};
-				ti.cbSize   = sizeof(TOOLINFO);
-				ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
-				ti.hwnd     = this->hwndDialog;
-				ti.uId      = (UINT_PTR)hwndGM;
-				ti.lpszText = (LPSTR)"Renames TVicHW64.sys and TVicPort64.sys to .sys.bak "
-				              "in System32\\drivers, hiding them from Valorant's Vanguard "
-				              "anti-cheat (ring 0 kernel access). Files are automatically "
-				              "restored when Game Mode is disabled or the app exits cleanly.";
-				::SendMessage(this->m_hwndTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
-			}
-		}
 	}
 
 	if (SlimDialog == 1) {
@@ -333,6 +311,40 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 			this->InitThemeAndChrome();
 		}
 	}
+
+	// Field tooltips: demystify the terse main-window labels. Registered here, on
+	// the *final* window (after the optional slim-dialog swap above), so the tips
+	// are not orphaned by that rebuild. AddTip creates the shared tip window on
+	// first call and silently skips controls a given layout doesn't have, so the
+	// slim dialogs (no Fan 1/2, Game Mode, etc.) just get the subset that applies.
+	this->AddTip(8100, "Current fan-control state read back from the embedded "
+	                   "controller (e.g. the active fan level or BIOS auto mode).");
+	this->AddTip(8103, "Switch: the raw fan-control byte currently programmed into "
+	                   "the EC. 0x00-0x07 are speed levels, 0x40 = full speed, "
+	                   "0x80 = hand control back to the BIOS.");
+	this->AddTip(8102, "Fan 1 tachometer reading (RPM) on dual-fan machines.");
+	this->AddTip(8104, "Fan 2 tachometer reading (RPM) on dual-fan machines.");
+	this->AddTip(8300, "BIOS mode: let the embedded controller run the fans on its "
+	                   "own thermal table. Safest; TPFanControl only monitors.");
+	this->AddTip(8301, "Smart mode: TPFanControl drives the fan from the curve in "
+	                   "TPFanControl.ini (the Level= lines), with hysteresis.");
+	this->AddTip(8302, "Manual mode: hold a fixed fan level you choose with the box "
+	                   "and slider below. The fan will not auto-adjust.");
+	this->AddTip(8310, "Manual fan level: 0 = off, 1-7 = increasing speed, "
+	                   "64 = maximum. Typing here switches to Manual mode.");
+	this->AddTip(8311, "Drag to set the manual fan level (0-7, far right = max). "
+	                   "Using the slider switches to Manual mode.");
+	this->AddTip(8101, "Per-sensor temperatures. 'active' shows only sensors with a "
+	                   "live reading; 'all' lists every EC sensor slot.");
+	this->AddTip(8120, "Temperature history. Right-click to clear; hover to read the "
+	                   "value at a point in time.");
+	this->AddTip(7013, "Renames TVicHW64.sys and TVicPort64.sys to .sys.bak "
+	                   "in System32\\drivers, hiding them from Valorant's Vanguard "
+	                   "anti-cheat (ring 0 kernel access). Files are automatically "
+	                   "restored when Game Mode is disabled or the app exits cleanly.");
+
+	// restore the main window to where the user last left it (on-screen only)
+	this->RestoreWindowPos();
 
 	//  wait xx seconds to start tpfc while booting to save icon
 	char bufsec[1024] = "";
@@ -419,6 +431,36 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 	if (this->StartMinimized)
 		::ShowWindow(this->hwndDialog, SW_MINIMIZE);
+}
+
+//-------------------------------------------------------------------------
+//  register a balloon tooltip on one main-dialog control
+//-------------------------------------------------------------------------
+void
+FANCONTROL::AddTip(int ctrlId, const char* text) {
+	HWND hwndCtl = ::GetDlgItem(this->hwndDialog, ctrlId);
+	if (!hwndCtl)
+		return;
+
+	// create the shared tip window on first use
+	if (!this->m_hwndTip) {
+		this->m_hwndTip = ::CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
+			WS_POPUP | TTS_ALWAYSTIP | TTS_BALLOON,
+			CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+			this->hwndDialog, NULL, this->hinstapp, NULL);
+		if (!this->m_hwndTip)
+			return;
+		::SendMessage(this->m_hwndTip, TTM_SETMAXTIPWIDTH, 0, 320);
+		::SendMessage(this->m_hwndTip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 30000); // keep up while reading
+	}
+
+	TOOLINFO ti = {};
+	ti.cbSize   = sizeof(TOOLINFO);
+	ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+	ti.hwnd     = this->hwndDialog;
+	ti.uId      = (UINT_PTR)hwndCtl;
+	ti.lpszText = (LPSTR)text;
+	::SendMessage(this->m_hwndTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
 }
 
 //-------------------------------------------------------------------------
@@ -1724,6 +1766,8 @@ FANCONTROL::DlgProc(HWND
 
 					// don't close if we can't set the fan back to bios controlled
 					if (!this->ActiveMode || this->SetFan("On close", 0x80, true)) {
+						// remember where the window was for next launch
+						this->SaveWindowPos("TPFanControl.ini");
 						::KillTimer(this->hwndDialog, m_fanTimer);
 						::KillTimer(this->hwndDialog, m_titleTimer);
 						::KillTimer(this->hwndDialog, m_iconTimer);
