@@ -600,11 +600,12 @@ FANCONTROL::ReadConfig(const char* configfile)
 		}
 	}
 
-	HANDLE hLockS = CreateMutex(NULL, FALSE, "TPFanControlMutex01");
-
-	if (hLockS == NULL) Runs_as_service = true;
-	if (WAIT_OBJECT_0 != WaitForSingleObject(hLockS, 0))
-		Runs_as_service = true;
+	// Running as a service exactly when the SCM control handler has been
+	// registered (ServiceMain sets g_SvcHandle before the worker -> ReadConfig
+	// runs; it stays NULL in desktop mode). Replaces a brittle reentrant-mutex /
+	// thread-identity side-effect that also leaked its handle.
+	extern SERVICE_STATUS_HANDLE g_SvcHandle;
+	Runs_as_service = (g_SvcHandle != NULL);
 
 	//Offset Fahrenheit to Celsius
 	if (this->SmartLevels[0].temp >= 80) Fahrenheit = true;
@@ -857,7 +858,9 @@ FANCONTROL::IsMinimized(void) const {
 //-------------------------------------------------------------------------
 void
 FANCONTROL::Trace(const char* text) {
-	char trace[16384] = "", datebuf[128] = "", line[512] = "", linecsv[512] = "";
+	// log control (9200) is capped at 4096 chars, so 8 KB is ample; keeps this
+	// constantly-called function's stack frame well under the /analyze threshold
+	char trace[8192] = "", datebuf[128] = "", line[512] = "";
 
 	this->CurrentDateTimeLocalized(datebuf, sizeof(datebuf));
 

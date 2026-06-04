@@ -234,17 +234,9 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	this->SmartLevels2[i].fan2 = 0;
 	i++;
 
-	// code title3
-	for (int _i = 0; _i < 111; _i++) {
-		switch (_i) {
-		case 0:
-			this->Title3[0] = 32;
-			break;            //blank
-		case 13:
-			this->Title3[13] = 32;
-			break;
-		}
-	}
+	// Title3 is appended to the window title and just needs a leading blank.
+	// (Replaces a pointless 111-iteration loop left over from the original code.)
+	this->Title3[0] = ' ';
 
 	// read config file
 	this->ReadConfig("TPFanControl.ini");
@@ -1745,10 +1737,9 @@ FANCONTROL::DlgProc(HWND
 					break;
 
 				case 5020: // end program
-				// Wait for the work thread to terminate
-					if (this->hThread) {
-						::WaitForSingleObject(this->hThread, THREAD_WAIT_TIMEOUT_MS);
-					}
+				// Wait for the work thread to terminate (capture the result: only
+				// close the handle below on a confirmed clean exit)
+					res = this->hThread ? ::WaitForSingleObject(this->hThread, THREAD_WAIT_TIMEOUT_MS) : WAIT_OBJECT_0;
 					if (!this->EcAccess.Lock(100))
 					{
 						// Something is going on, let's do this later
@@ -1763,9 +1754,11 @@ FANCONTROL::DlgProc(HWND
 						::KillTimer(this->hwndDialog, m_titleTimer);
 						::KillTimer(this->hwndDialog, m_iconTimer);
 						::KillTimer(this->hwndDialog, m_renewTimer);
-						BOOL CloHT = CloseHandle(this->hThread); this->hThread = NULL;  // avoid stale/double-close in dtor & WM__NEWDATA
-						// BOOL CloHM=CloseHandle(this->hLock);
-						// BOOL CloHS=CloseHandle(this->hLockS);
+						// close only after a confirmed clean exit; on timeout leave the
+						// handle for the destructor rather than close a live thread
+						if (this->hThread && res == WAIT_OBJECT_0) {
+							CloseHandle(this->hThread); this->hThread = NULL;
+						}
 						this->Trace("Exiting ProcessDialog");
 						::PostMessage(hwnd, WM__DISMISSDLG, IDCANCEL, 0); // exit from ProcessDialog()
 					}

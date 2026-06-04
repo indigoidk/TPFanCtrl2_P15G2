@@ -151,11 +151,11 @@ DWORD UninstallService(bool quiet) {
     return 0;
 }
 
-void ShowError(DWORD ec, const char *description) { 
-    char *msgBuf;
+void ShowError(DWORD ec, const char *description) {
+    char *msgBuf = NULL;
 
-    FormatMessage(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+    DWORD n = FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER |
         FORMAT_MESSAGE_FROM_SYSTEM,
         NULL,
         ec,
@@ -163,13 +163,21 @@ void ShowError(DWORD ec, const char *description) {
         (LPTSTR) &msgBuf,
         0, NULL );
 
-    size_t dispBuf_len = strlen(msgBuf) + strlen(description) + 40;
-    char *dispBuf = (char *)LocalAlloc(LMEM_ZEROINIT, dispBuf_len); 
-    sprintf_s(dispBuf, dispBuf_len, "%s, error code %d: %s", description, ec, msgBuf); 
-    MessageBox(NULL, dispBuf, "Error", MB_OK); 
+    // FormatMessage can fail (leaving msgBuf untouched/NULL); never deref it blindly
+    const char *msg = (n && msgBuf) ? msgBuf : "(no system message available)";
 
-    LocalFree(msgBuf);
-    LocalFree(dispBuf);
+    size_t dispBuf_len = strlen(msg) + strlen(description) + 40;
+    char *dispBuf = (char *)LocalAlloc(LMEM_ZEROINIT, dispBuf_len);
+    if (dispBuf) {
+        sprintf_s(dispBuf, dispBuf_len, "%s, error code %d: %s", description, ec, msg);
+        MessageBox(NULL, dispBuf, "Error", MB_OK);
+        LocalFree(dispBuf);
+    }
+    else {
+        MessageBox(NULL, msg, "Error", MB_OK);   // allocation failed: show what we have
+    }
+
+    if (msgBuf) LocalFree(msgBuf);
 }
 
 void ShowMessage(const char *title, const char *description) { 
