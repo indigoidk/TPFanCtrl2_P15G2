@@ -271,8 +271,8 @@ END
 //
 
 1 VERSIONINFO
- FILEVERSION 1,0,0,63
- PRODUCTVERSION 1,0,0,63
+ FILEVERSION 2,33,6,0
+ PRODUCTVERSION 2,33,6,0
  FILEFLAGSMASK 0x8L
 #ifdef _DEBUG
  FILEFLAGS 0x9L
@@ -289,13 +289,13 @@ BEGIN
         BEGIN
             VALUE "Comments", "Usage on own risk!"
             VALUE "FileDescription", "Fan Control Software"
-            VALUE "FileVersion", "1, 0, 0, 63"
+            VALUE "FileVersion", "2, 33, 6, 0"
             VALUE "InternalName", "TPFanControl v2.33 P15G2 Dual"
             VALUE "LegalTrademarks", "TPFanControl v2.33 P15G2 Dual"
             VALUE "OriginalFilename", "TPFanControl.exe"
             VALUE "PrivateBuild", "Fan Control Software"
             VALUE "ProductName", "TPFanControl v2.33 P15G2 Dual"
-            VALUE "ProductVersion", "1, 0, 0, 63"
+            VALUE "ProductVersion", "2, 33, 6, 0"
             VALUE "SpecialBuild", "easy easy setup"
         END
     END

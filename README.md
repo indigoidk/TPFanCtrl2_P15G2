@@ -130,8 +130,10 @@ Stability and correctness pass (largely internal; no UI changes).
   overflow.
 - **Robustness / build:** removed a too-small linker stack reserve that left
   Release builds stack-fragile; switched the boot-delay timer to `GetTickCount64`
-  (no ~49-day wrap); bounds-guarded the temperature-list cache signature; and
-  hardened the service error dialog against a null dereference.
+  (no ~49-day wrap); bounds-guarded the temperature-list cache signature;
+  hardened the service error dialog against a null dereference; and bumped the
+  binary's `VERSIONINFO` (`FILEVERSION`/`PRODUCTVERSION`) to `2.33.6.0` so the
+  executable's file properties reflect the release (was frozen at `1.0.0.63`).
 
 ### v2.33.5
 
