@@ -336,8 +336,8 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	                   "Using the slider switches to Manual mode.");
 	this->AddTip(8101, "Per-sensor temperatures. 'active' shows only sensors with a "
 	                   "live reading; 'all' lists every EC sensor slot.");
-	this->AddTip(8120, "Temperature history. Right-click to clear; hover to read the "
-	                   "value at a point in time.");
+	this->AddTip(8120, "Temperature history sparkline of the max sensor. Shows current, "
+	                   "average and min-max for the window. Right-click to clear.");
 	this->AddTip(7013, "Renames TVicHW64.sys and TVicPort64.sys to .sys.bak "
 	                   "in System32\\drivers, hiding them from Valorant's Vanguard "
 	                   "anti-cheat (ring 0 kernel access). Files are automatically "
