@@ -103,6 +103,24 @@ Highlights:
 
 ## Changelog
 
+### v2.33.7
+
+GUI experience pass (no change to the fan-control engine; still pure Win32, no
+added runtime dependencies).
+
+- **In-app Smart fan-curve editor.** The `Level=` / `Level2=` curves no longer
+  require hand-editing the ini. A new **Edit Fan Curve…** dialog (tray menu, and
+  a **Fan curve…** button in Settings) edits both Smart profiles in a grid of
+  Temp / Fan / Hyst+ / Hyst- rows. Edits are validated, sorted, applied live
+  (hysteresis reset), and written back to the ini — shown/edited in your display
+  unit and converted back to Fahrenheit on save so the auto-detect round-trips.
+- **Field tooltips.** Hovering the terse main-window controls (State, Switch,
+  Fan 1/2, the Mode radios, the manual level box and slider, the temperature
+  list and history graph, Game Mode) now explains what each one means.
+- **Window-position memory.** The main window reopens where you last left it
+  (saved to a `WindowPos=` ini line, and only restored if it still lands on a
+  connected monitor; size is remembered for the resizable full window).
+
 ### v2.33.6
 
 Stability and correctness pass (largely internal; no UI changes).
