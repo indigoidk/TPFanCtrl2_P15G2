@@ -196,7 +196,7 @@ protected:
 	void ApplySettingsFromDialog(HWND hwnd);   // shared by OK and Apply in the Settings dialog
 
 	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
-	char m_tempListSig[1024] = "";   // cache: skip RichEdit rebuild when nothing visible changed
+	char m_tempListSig[2048] = "";   // cache: skip RichEdit rebuild when nothing visible changed
 
 	char Title[128];
 	char Title2[128];

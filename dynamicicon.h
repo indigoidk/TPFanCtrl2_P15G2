@@ -27,7 +27,8 @@ private:
 
 private:
 	__inline static HFONT CreateFont(const HDC hDC, int size, bool big = false);
-	//default und copy verbergen
-	__inline CDynamicIcon() {};
-	__inline CDynamicIcon(const CDynamicIcon&) {};
+	// default und copy verbergen: deleted rather than private empty bodies so they
+	// can never run with uninitialized GDI members (and silences static analysis)
+	CDynamicIcon() = delete;
+	CDynamicIcon(const CDynamicIcon&) = delete;
 };

@@ -351,11 +351,26 @@ void WorkerThread(void *dummy) {
 		CloseTVicPort();
 	}
 	else {
-		::MessageBox(HWND_DESKTOP, 
-					"Error during initialization of Port Driver.\r\n"
-					"(tvicport.sys missing in app folder or failed to load)",
-					"Fan Control", 
-					MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
+		// a service can't meaningfully show a modal box (and shouldn't block on one);
+		// only pop the error in interactive mode
+		if (!g_SvcHandle)
+			::MessageBox(HWND_DESKTOP,
+						"Error during initialization of Port Driver.\r\n"
+						"(tvicport.sys missing in app folder or failed to load)",
+						"Fan Control",
+						MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
+	}
+
+	// If running as a service and this exit was NOT triggered by an SCM stop (the
+	// control handler reports STOPPED itself in that case), report STOPPED now so a
+	// dead worker — e.g. the EC port never opened — doesn't leave the service stuck
+	// in RUNNING.
+	bool stopRequested = g_stopEvent && ::WaitForSingleObject(g_stopEvent, 0) == WAIT_OBJECT_0;
+	if (g_SvcHandle && !stopRequested) {
+		g_SvcStatus.dwCurrentState = SERVICE_STOPPED;
+		g_SvcStatus.dwWin32ExitCode = ok ? NO_ERROR : ERROR_SERVICE_SPECIFIC_ERROR;
+		g_SvcStatus.dwServiceSpecificExitCode = ok ? 0 : 3;
+		::SetServiceStatus(g_SvcHandle, &g_SvcStatus);
 	}
 }
 

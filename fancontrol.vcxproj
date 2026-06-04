@@ -93,10 +93,6 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <ProgramDatabaseFile>.\Release/fancontrol.pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
-      <HeapReserveSize>16384</HeapReserveSize>
-      <HeapCommitSize>16384</HeapCommitSize>
-      <StackReserveSize>16384</StackReserveSize>
-      <StackCommitSize>16384</StackCommitSize>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>

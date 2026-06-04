@@ -344,13 +344,13 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 	//  wait xx seconds to start tpfc while booting to save icon
 	char bufsec[1024] = "";
-	DWORD tickCount = GetTickCount();
+	ULONGLONG tickCount = GetTickCount64();   // 64-bit: no ~49-day wrap on long uptimes
 
 	sprintf_s(bufsec, sizeof(bufsec), "Windows uptime since boot %d sec., SecWinUptime= %d sec.", (int)(tickCount / 1000), SecWinUptime);
 
 	this->Trace(bufsec);
 
-	if ((tickCount / 1000) <= (DWORD)SecWinUptime) {
+	if ((tickCount / 1000) <= (ULONGLONG)SecWinUptime) {
 		sprintf_s(bufsec, sizeof(bufsec), "Save the icon by a start delay of %d seconds (SecStartDelay)", SecStartDelay);
 
 		this->Trace(bufsec);
@@ -375,8 +375,8 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	}
 
 	// sleep until start time + delay time
-	if ((GetTickCount() / 1000) <= (DWORD)SecWinUptime) {
-		while ((DWORD)(tickCount + SecStartDelay * 1000) >= GetTickCount())
+	if ((GetTickCount64() / 1000) <= (ULONGLONG)SecWinUptime) {
+		while ((tickCount + (ULONGLONG)SecStartDelay * 1000) >= GetTickCount64())
 			Sleep(200);
 	}
 
@@ -830,7 +830,9 @@ FANCONTROL::UpdateTempList() {
 	// RichEdit when nothing visible has changed since the last render.
 	struct { COLORREF color; char line[128]; } rows[12];
 	int nrows = 0;
-	char sig[1024];
+	// sized for the worst case (12 rows * (color + ':' + 128-char line) + header)
+	// and appended through a bounds guard so siglen can never pass the buffer end
+	char sig[2048];
 	int siglen = sprintf_s(sig, sizeof(sig), "%lu|%d|%d|%d|",
 		(unsigned long)this->m_clrText, this->ShowTempHex ? 1 : 0,
 		this->Fahrenheit ? 1 : 0, this->ShowAll);
@@ -869,8 +871,11 @@ FANCONTROL::UpdateTempList() {
 			sprintf_s(rows[nrows].line, sizeof(rows[nrows].line), "%s\t%s\r\n",
 				this->State.SensorName[i], obuf2);
 
-		siglen += sprintf_s(sig + siglen, sizeof(sig) - siglen, "%lu:%s",
-			(unsigned long)lineColor, rows[nrows].line);
+		if (siglen >= 0 && siglen < (int)sizeof(sig)) {
+			int n = sprintf_s(sig + siglen, sizeof(sig) - siglen, "%lu:%s",
+				(unsigned long)lineColor, rows[nrows].line);
+			if (n > 0) siglen += n;
+		}
 		nrows++;
 	}
 
