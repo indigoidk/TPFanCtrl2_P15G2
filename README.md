@@ -90,6 +90,36 @@ Highlights:
 
 ## Changelog
 
+### v2.33.6
+
+Stability and correctness pass (largely internal; no UI changes).
+
+- **Temperatures / fan decisions:** sensor offsets (`ShowBiasedTemps`) are now
+  applied once and consistently, so the value driving Smart-mode fan levels
+  matches the temperature list. Previously the offset was applied twice, making
+  fan decisions run cooler than what was shown; the hysteresis window
+  (`hystMin`/`hystMax`) is now honored everywhere.
+- **Embedded controller reads:** wait for the EC output buffer before reading, so
+  a stale byte can no longer latch and drive a wrong fan decision.
+- **Shutdown / restart:** BIOS fan control is now restored **synchronously** on
+  Windows shutdown instead of via a deferred message that could be skipped if the
+  process was terminated first.
+- **Service mode:** detection no longer relies on a brittle mutex/thread side
+  effect (and no longer leaks a handle); the service reports `STOPPED` when its
+  worker exits or fails to open the EC port, can no longer hang on stop, and
+  quotes its executable path on install (spaces-in-path / unquoted-service-path
+  fix).
+- **Game Mode:** a partially-completed driver hide now rolls back, so it can't
+  leave the system with only one of the two TVic drivers renamed.
+- **Config safety:** `TPFanControl.ini` is replaced atomically (a failed save can
+  no longer lose it); `IgnoreSensors` matches case-insensitively as the comments
+  document; oversized fan-curve (`level=` / `level2=`) tables can no longer
+  overflow.
+- **Robustness / build:** removed a too-small linker stack reserve that left
+  Release builds stack-fragile; switched the boot-delay timer to `GetTickCount64`
+  (no ~49-day wrap); bounds-guarded the temperature-list cache signature; and
+  hardened the service error dialog against a null dereference.
+
 ### v2.33.5
 
 - Added a **Settings…** button to the main window (previously only reachable
