@@ -1,0 +1,5 @@
+# build artifacts from run_tests.ps1
+*.exe
+*.obj
+*.pdb
+*.ilk

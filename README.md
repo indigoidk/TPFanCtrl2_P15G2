@@ -68,6 +68,19 @@ The output is `Release\TPFanControl.exe`. Every push and pull request is also
 built by GitHub Actions (`.github/workflows/build.yml`), which uploads the exe
 as a build artifact.
 
+### Tests
+
+The hardware-independent fan-decision logic (temperature biasing and the Smart
+fan-curve algorithm) is factored into `fanlogic.h` and covered by standalone unit
+tests that need no driver or hardware. Run them from a Developer prompt:
+
+```
+powershell -ExecutionPolicy Bypass -File tests\run_tests.ps1
+```
+
+`FANCONTROL::BiasedTemp()` and `FANCONTROL::SmartControl()` delegate to
+`fanlogic.h`, so the tests exercise the same code the app runs.
+
 Pushing a version tag publishes a downloadable **Release** with the packaged
 zip attached (`.github/workflows/release.yml`):
 

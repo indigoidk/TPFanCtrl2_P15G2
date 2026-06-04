@@ -19,6 +19,7 @@
 #include "fancontrol.h"
 #include "tools.h"
 #include "TVicPort.h"
+#include "fanlogic.h"   // pure decision logic (unit-tested in tests/fanlogic_tests.cpp)
 
 #define TP_ECOFFSET_FAN         (char)0x2F    // 1 byte (binary xyzz zzz)
 #define TP_ECOFFSET_FANSPEED    (char)0x84    // 16 bit word, lo/hi byte
@@ -57,16 +58,12 @@ FANCONTROL::TraceModeChange() {
 //-------------------------------------------------------------------------
 int
 FANCONTROL::BiasedTemp(int rawTemp, int sensorIndex) const {
-	if (!this->ShowBiasedTemps)
-		return rawTemp;
-
-	int offs = this->SensorOffset[sensorIndex].offs;
-	// inside the exclusion window the offset is disabled (compare on real temp)
-	if (rawTemp >= this->SensorOffset[sensorIndex].hystMin &&
-		rawTemp <= this->SensorOffset[sensorIndex].hystMax)
-		offs = 0;
-
-	return rawTemp - offs;
+	// delegate to the pure, unit-tested implementation
+	return fanlogic::biased_temp(rawTemp,
+		this->SensorOffset[sensorIndex].offs,
+		this->SensorOffset[sensorIndex].hystMin,
+		this->SensorOffset[sensorIndex].hystMax,
+		this->ShowBiasedTemps != 0);
 }
 
 //-------------------------------------------------------------------------
@@ -285,80 +282,27 @@ FANCONTROL::HandleData(void) {
 //-------------------------------------------------------------------------
 void
 FANCONTROL::SmartControl(void) {
-	int i,
-		newfanctrl = -1,
-		levelIndex = -1,
-		fanctrl = this->State.FanCtrl;
-
 	// CurrentMode is Smart (2) here; log a BIOS->Smart / Manual->Smart transition
 	this->TraceModeChange();
 
-//i         Temp Fan Hup Hdown 
-//0 Level = 50   0   0   0 
-//1 Level = 60   1   0   5 <--- means, when going down switch to this level at 55
-//2 Level = 70   2   0   0 
-//3 Level = 80   4   5   0 <--- means, when going up, switch this level at 85
-//4 Level = 90   7   0   0 
-//5 Level = 95   64  0   0 
-//6 Level = 105 128  0   0 
-
-	newfanctrl = -1;
-
-	if ((fanctrl > 7 && (fanctrl != 64 || !Lev64Norm)) || this->PreviousMode == 3 || this->PreviousMode == 1) {
-		newfanctrl = 0;
-		levelIndex = 0;
-		fanctrl = 0;
+	// Copy the Smart table into the hardware-independent view, then let the pure,
+	// unit-tested decision logic choose the level. This mirrors the previous inline
+	// ramp-up / ramp-down + hysteresis algorithm (see tests/fanlogic_tests.cpp).
+	//   Smart-table rows: temp  fan  hystUp  hystDown   (a temp == -1 row terminates)
+	const int n = (int)ARRAYMAX(this->SmartLevels);
+	fanlogic::FanLevel levels[ARRAYMAX(this->SmartLevels)];
+	for (int li = 0; li < n; li++) {
+		levels[li].temp     = this->SmartLevels[li].temp;
+		levels[li].fan      = this->SmartLevels[li].fan;
+		levels[li].hystUp   = this->SmartLevels[li].hystUp;
+		levels[li].hystDown = this->SmartLevels[li].hystDown;
 	}
 
-	// Check for fan speed ramp upwards
-	for (i = 0; this->SmartLevels[i].temp != -1; i++) {
-		if (this->MaxTemp >= this->SmartLevels[i].temp && this->SmartLevels[i].fan >= fanctrl) {
-			newfanctrl = this->SmartLevels[i].fan;
-			levelIndex = i;
-		}
-	}
+	int newfan = fanlogic::smart_decide(this->MaxTemp, this->State.FanCtrl,
+		this->Lev64Norm != 0, this->PreviousMode, levels, n, this->LastSmartLevel);
 
-	// Check for fan speed ramp downwards
-	if (newfanctrl == -1) {
-		for (i = 0; this->SmartLevels[i].temp != -1; i++) {
-			if (this->MaxTemp <= this->SmartLevels[i].temp && this->SmartLevels[i].fan < fanctrl) {
-				newfanctrl = this->SmartLevels[i].fan;
-				levelIndex = i;
-				break;
-			}
-		}
-	}
-
-	// fan speed ramp up or down?
-	if (newfanctrl != -1 && newfanctrl != this->State.FanCtrl) {
-		//if (newfanctrl == 0x80) {  
-		    // switch to BIOS-auto mode
-		//	this->ModeToDialog(1);    
-		//}
-
-		// do not change if hyst zone, determine which hyst zone if we are in based on previous temp
-		// DO NOT HAVE HYSTERESIS OVERLAP WITH FAN TEMPS IN CONFIG!
-		SMARTENTRY newLevel = this->SmartLevels[levelIndex];
-		if (this->LastSmartLevel < 0) { // ignore hyst on first time setting fan
-			this->LastSmartLevel = levelIndex;
-			this->SetFan("Smart", newfanctrl);
-			return;
-		}
-
-		if (this->MaxTemp < this->SmartLevels[this->LastSmartLevel].temp) {
-			if (this->MaxTemp > newLevel.temp - newLevel.hystDown)
-				return; // cooling
-		}
-		else {
-			if (this->MaxTemp < newLevel.temp + newLevel.hystUp)
-				return; // rising 
-		}
-
-		this->LastSmartLevel = levelIndex; 
-		this->SetFan("Smart", newfanctrl);
-	}
-
-	return;
+	if (newfan != -1)
+		this->SetFan("Smart", newfan);
 }
 
 //-------------------------------------------------------------------------
