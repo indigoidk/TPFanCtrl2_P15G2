@@ -260,6 +260,10 @@ protected:
 
 	void SmartControl();
 
+	// switch the active Smart table to profile 1 or 2: copies ALL fields
+	// (temp, fan, hystUp, hystDown) and resets the hysteresis anchor.
+	void ActivateSmartProfile(int profile);
+
 	void TraceModeChange();   // log "Change Mode from <prev>-><cur>" (no-op if unchanged)
 
 	int SetFan(const char* source, int level, bool final = false);

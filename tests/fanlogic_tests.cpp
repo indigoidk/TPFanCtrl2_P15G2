@@ -108,9 +108,55 @@ static void test_smart() {
 	}
 }
 
+// Edge cases tied to the profile-switch fixes: a stale lastLevel (from the
+// previous curve) must not be reused, hysteresis must use the supplied table,
+// and odd tables must not read out of bounds.
+static void test_smart_edges() {
+	// A stale lastLevel from a previous profile can wrongly SUPPRESS the first
+	// decision after a switch; resetting it to -1 (what ActivateSmartProfile now
+	// does) applies the decision immediately. Same inputs, different lastLevel:
+	{
+		int fresh = -1;
+		CHECK(smart_decide(58, 0, false, 2, kDefault, kN, fresh) == 3);   // applied
+		CHECK(fresh == 1);
+
+		int stale = 4;   // index that only made sense on the old curve
+		CHECK(smart_decide(58, 0, false, 2, kDefault, kN, stale) == -1);  // wrongly held
+	}
+
+	// hysteresis uses the *provided* table's hyst fields (a switched-in SM2 curve
+	// uses SM2's hysteresis, not a leftover one)
+	{
+		const FanLevel sm2[] = { { 45, 0, 0, 0 }, { 58, 4, 3, 0 }, { 72, 7, 0, 0 }, { -1, 0, 0, 0 } };
+		int last = 0;
+		CHECK(smart_decide(59, 0, false, 2, sm2, 4, last) == -1);   // 59 < 58+3 -> hold
+		CHECK(last == 0);
+		int last2 = 0;
+		CHECK(smart_decide(62, 0, false, 2, sm2, 4, last2) == 4);   // 62 >= 61 -> apply
+		CHECK(last2 == 1);
+	}
+
+	// table with only the terminator -> no decision, no crash
+	{
+		const FanLevel empty[] = { { -1, 0, 0, 0 } };
+		int last = -1;
+		CHECK(smart_decide(80, 0, false, 2, empty, 1, last) == -1);
+		CHECK(last == -1);
+	}
+
+	// table with no -1 terminator must be bounded by n (no out-of-bounds read)
+	{
+		const FanLevel noterm[] = { { 50, 0, 0, 0 }, { 60, 5, 0, 0 } };
+		int last = -1;
+		CHECK(smart_decide(65, 0, false, 2, noterm, 2, last) == 5);
+		CHECK(last == 1);
+	}
+}
+
 int main() {
 	test_biased_temp();
 	test_smart();
+	test_smart_edges();
 
 	if (g_fail == 0) {
 		std::printf("OK: all %d checks passed.\n", g_checks);

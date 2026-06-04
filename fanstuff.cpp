@@ -306,6 +306,32 @@ FANCONTROL::SmartControl(void) {
 }
 
 //-------------------------------------------------------------------------
+//  switch the active Smart table to profile 1 or 2.  Copies ALL fields
+//  (temp, fan, hystUp, hystDown) - not just temp/fan - and resets the
+//  hysteresis anchor so the new curve is not held by the old profile's state.
+//-------------------------------------------------------------------------
+void
+FANCONTROL::ActivateSmartProfile(int profile) {
+	const int n = (int)ARRAYMAX(this->SmartLevels);
+	for (int i = 0; i < n; i++) {
+		if (profile == 2) {
+			this->SmartLevels[i].temp     = this->SmartLevels2[i].temp2;
+			this->SmartLevels[i].fan      = this->SmartLevels2[i].fan2;
+			this->SmartLevels[i].hystUp   = this->SmartLevels2[i].hystUp2;
+			this->SmartLevels[i].hystDown = this->SmartLevels2[i].hystDown2;
+		}
+		else {
+			this->SmartLevels[i].temp     = this->SmartLevels1[i].temp1;
+			this->SmartLevels[i].fan      = this->SmartLevels1[i].fan1;
+			this->SmartLevels[i].hystUp   = this->SmartLevels1[i].hystUp1;
+			this->SmartLevels[i].hystDown = this->SmartLevels1[i].hystDown1;
+		}
+	}
+	// the hysteresis anchor index refers to the previous curve; invalidate it
+	this->LastSmartLevel = -1;
+}
+
+//-------------------------------------------------------------------------
 //  set fan state via EC
 //-------------------------------------------------------------------------
 int

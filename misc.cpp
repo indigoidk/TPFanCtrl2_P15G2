@@ -738,12 +738,29 @@ FANCONTROL::ReadConfig(const char* configfile)
 	this->Trace(buf);
 
 	//Offset& Smartlevels Fahrenheit to Celsius
+	// Thresholds are absolute temps (F->C with the -32 offset); hystUp/hystDown are
+	// *deltas*, so scale them by 5/9 only (a 10 F band must not act like 10 C).
 	if (Fahrenheit) {
-		for (i = 0; this->SmartLevels[i].temp != -1; i++) { this->SmartLevels[i].temp = (this->SmartLevels[i].temp - 32) * 5 / 9; }
-		for (i = 0; this->SmartLevels1[i].temp1 != -1; i++) { this->SmartLevels1[i].temp1 = (this->SmartLevels1[i].temp1 - 32) * 5 / 9; }
-		if (this->SmartLevels2[0].temp2 == 0); // Indikator für 2.Profil
-		else this->SmartLevels2[0].temp2 = (this->SmartLevels2[0].temp2 - 32) * 5 / 9;
-		for (i = 1; this->SmartLevels2[i].temp2 != -1; i++) { this->SmartLevels2[i].temp2 = (this->SmartLevels2[i].temp2 - 32) * 5 / 9; }
+		for (i = 0; this->SmartLevels[i].temp != -1; i++) {
+			this->SmartLevels[i].temp     = (this->SmartLevels[i].temp - 32) * 5 / 9;
+			this->SmartLevels[i].hystUp   =  this->SmartLevels[i].hystUp   * 5 / 9;
+			this->SmartLevels[i].hystDown =  this->SmartLevels[i].hystDown * 5 / 9;
+		}
+		for (i = 0; this->SmartLevels1[i].temp1 != -1; i++) {
+			this->SmartLevels1[i].temp1     = (this->SmartLevels1[i].temp1 - 32) * 5 / 9;
+			this->SmartLevels1[i].hystUp1   =  this->SmartLevels1[i].hystUp1   * 5 / 9;
+			this->SmartLevels1[i].hystDown1 =  this->SmartLevels1[i].hystDown1 * 5 / 9;
+		}
+		if (this->SmartLevels2[0].temp2 != 0) {   // 0 = no 2nd profile present
+			this->SmartLevels2[0].temp2     = (this->SmartLevels2[0].temp2 - 32) * 5 / 9;
+			this->SmartLevels2[0].hystUp2   =  this->SmartLevels2[0].hystUp2   * 5 / 9;
+			this->SmartLevels2[0].hystDown2 =  this->SmartLevels2[0].hystDown2 * 5 / 9;
+		}
+		for (i = 1; this->SmartLevels2[i].temp2 != -1; i++) {
+			this->SmartLevels2[i].temp2     = (this->SmartLevels2[i].temp2 - 32) * 5 / 9;
+			this->SmartLevels2[i].hystUp2   =  this->SmartLevels2[i].hystUp2   * 5 / 9;
+			this->SmartLevels2[i].hystDown2 =  this->SmartLevels2[i].hystDown2 * 5 / 9;
+		}
 		//		for (i= 0; i<15; i++) {SensorOffset[i]= SensorOffset[i] * 5/9;}
 		this->IconLevels[0] = (this->IconLevels[0] - 32) * 5 / 9;
 		this->IconLevels[1] = (this->IconLevels[1] - 32) * 5 / 9;

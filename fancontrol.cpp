@@ -1286,12 +1286,7 @@ FANCONTROL::DlgProc(HWND
 			}
 			this->IndSmartLevel = 0;
 
-			for (
-				int i = 0;
-				i < 32; i++) {
-				this->SmartLevels[i].temp = this->SmartLevels1[i].temp1;
-				this->SmartLevels[i].fan = this->SmartLevels1[i].fan1;
-			}
+			this->ActivateSmartProfile(1);
 			::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 			break;
 
@@ -1303,12 +1298,7 @@ FANCONTROL::DlgProc(HWND
 			}
 			this->IndSmartLevel = 1;
 
-			for (
-				int i = 0;
-				i < 32; i++) {
-				this->SmartLevels[i].temp = this->SmartLevels2[i].temp2;
-				this->SmartLevels[i].fan = this->SmartLevels2[i].fan2;
-			}
+			this->ActivateSmartProfile(2);
 			::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 			break;
 
@@ -1355,12 +1345,7 @@ FANCONTROL::DlgProc(HWND
 					Trace(obuf);
 				this->
 					IndSmartLevel = 1;
-				for (
-					int i = 0;
-					i < 32; i++) {
-					this->SmartLevels[i].temp = this->SmartLevels2[i].temp2;
-					this->SmartLevels[i].fan = this->SmartLevels2[i].fan2;
-				}
+				this->ActivateSmartProfile(2);
 				::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 				break;
 			case 1:
@@ -1368,12 +1353,7 @@ FANCONTROL::DlgProc(HWND
 					sizeof(obuf), "Activation of Fan Control Profile 'Smart Mode 1'");
 				this->Trace(obuf);
 				this->IndSmartLevel = 0;
-				for (
-					int i = 0;
-					i < 32; i++) {
-					this->SmartLevels[i].temp = this->SmartLevels1[i].temp1;
-					this->SmartLevels[i].fan = this->SmartLevels1[i].fan1;
-				}
+				this->ActivateSmartProfile(1);
 				::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 				break;
 			}
@@ -1678,10 +1658,7 @@ FANCONTROL::DlgProc(HWND
 					}
 					this->IndSmartLevel = 0;
 					// r�berkopieren
-					for (int i = 0;	i < 32; i++) {
-						this->SmartLevels[i].temp = this->SmartLevels1[i].temp1;
-						this->SmartLevels[i].fan = this->SmartLevels1[i].fan1;
-					}
+					this->ActivateSmartProfile(1);
 					::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 					break;
 
@@ -1693,10 +1670,7 @@ FANCONTROL::DlgProc(HWND
 					}
 					this->IndSmartLevel = 1;
 
-					for (int i = 0;	i < 32; i++) {
-						this->SmartLevels[i].temp = this->SmartLevels2[i].temp2;
-						this->SmartLevels[i].fan = this->SmartLevels2[i].fan2;
-					}
+					this->ActivateSmartProfile(2);
 					::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 					break;
 
