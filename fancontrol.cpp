@@ -1752,6 +1752,10 @@ FANCONTROL::DlgProc(HWND
 					this->ShowSettingsDialog();
 					break;
 
+				case 5110: // smart fan-curve editor
+					this->ShowCurveDialog();
+					break;
+
 				case 5020: // end program
 				// Wait for the work thread to terminate (capture the result: only
 				// close the handle below on a confirmed clean exit)
@@ -2176,6 +2180,10 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			}
 			return TRUE;
 
+		case 9330: // open the Smart fan-curve editor (modal, owned by Settings)
+			if (self) self->ShowCurveDialog(hwnd);
+			return TRUE;
+
 		case IDCANCEL:
 			::EndDialog(hwnd, IDCANCEL);
 			return TRUE;
@@ -2288,6 +2296,259 @@ void FANCONTROL::ShowSettingsDialog()
 {
 	::DialogBoxParam(this->hinstapp, MAKEINTRESOURCE(9300),
 		this->hwndDialog, (DLGPROC)FANCONTROL::SettingsDlgProc, (LPARAM)this);
+}
+
+//-------------------------------------------------------------------------
+//  Smart fan-curve editor (dialog 9400)
+//-------------------------------------------------------------------------
+
+// row r, column c (0=temp,1=fan,2=hystUp,3=hystDown) -> dialog control id
+static inline int CurveCellId(int r, int c) { return 9410 + r * 4 + c; }
+
+// to/from the display unit: in-memory SmartLevels are Celsius; temps convert with
+// the 32 offset, hysteresis values are deltas (scale only). Mirrors ReadConfig.
+static inline int CurveToDisplayTemp(int c, bool f)  { return f ? c * 9 / 5 + 32 : c; }
+static inline int CurveToDisplayDelta(int c, bool f) { return f ? c * 9 / 5      : c; }
+static inline int CurveFromDisplayTemp(int d, bool f)  { return f ? (d - 32) * 5 / 9 : d; }
+static inline int CurveFromDisplayDelta(int d, bool f) { return f ? d * 5 / 9         : d; }
+
+// copy a profile's live table (SmartLevels1 / SmartLevels2, Celsius) into the
+// working buffer, converted to the display unit. Empty rows get temp = INT_MIN.
+void
+FANCONTROL::CurveLoadProfileToBuf(int profile) {
+	bool f = this->Fahrenheit != 0;
+	for (int r = 0; r < CURVE_ROWS; r++) {
+		int t, fan, hu, hd;
+		if (profile == 0) {
+			t = this->SmartLevels1[r].temp1; fan = this->SmartLevels1[r].fan1;
+			hu = this->SmartLevels1[r].hystUp1; hd = this->SmartLevels1[r].hystDown1;
+		}
+		else {
+			t = this->SmartLevels2[r].temp2; fan = this->SmartLevels2[r].fan2;
+			hu = this->SmartLevels2[r].hystUp2; hd = this->SmartLevels2[r].hystDown2;
+		}
+		// terminator (-1) or "no profile 2" (temp 0 at row 0) ends the table
+		if (t == -1 || (profile == 1 && r == 0 && t == 0)) {
+			for (; r < CURVE_ROWS; r++) m_ceBuf[profile][r].temp = INT_MIN;
+			return;
+		}
+		m_ceBuf[profile][r].temp     = CurveToDisplayTemp(t, f);
+		m_ceBuf[profile][r].fan      = fan;
+		m_ceBuf[profile][r].hystUp   = CurveToDisplayDelta(hu, f);
+		m_ceBuf[profile][r].hystDown = CurveToDisplayDelta(hd, f);
+	}
+}
+
+// working buffer -> the on-screen edit boxes (blank where temp is unset)
+void
+FANCONTROL::CurveBufToGrid(HWND hwnd, int profile) {
+	for (int r = 0; r < CURVE_ROWS; r++) {
+		const CURVEROW& row = m_ceBuf[profile][r];
+		if (row.temp == INT_MIN) {
+			for (int c = 0; c < 4; c++) ::SetDlgItemTextA(hwnd, CurveCellId(r, c), "");
+			continue;
+		}
+		::SetDlgItemInt(hwnd, CurveCellId(r, 0), row.temp, TRUE);
+		::SetDlgItemInt(hwnd, CurveCellId(r, 1), row.fan, FALSE);
+		::SetDlgItemInt(hwnd, CurveCellId(r, 2), row.hystUp, FALSE);
+		::SetDlgItemInt(hwnd, CurveCellId(r, 3), row.hystDown, FALSE);
+	}
+}
+
+// the on-screen edit boxes -> working buffer. A row counts only if its Temp box
+// is non-empty; blank Temp marks an unused row (temp = INT_MIN).
+void
+FANCONTROL::CurveGridToBuf(HWND hwnd, int profile) {
+	for (int r = 0; r < CURVE_ROWS; r++) {
+		char tb[16];
+		::GetDlgItemTextA(hwnd, CurveCellId(r, 0), tb, sizeof(tb));
+		char* s = tb; while (*s == ' ' || *s == '\t') s++;
+		if (*s == 0) { m_ceBuf[profile][r].temp = INT_MIN; continue; }
+
+		BOOL ok = FALSE;
+		m_ceBuf[profile][r].temp     = (int)::GetDlgItemInt(hwnd, CurveCellId(r, 0), &ok, TRUE);
+		m_ceBuf[profile][r].fan      = (int)::GetDlgItemInt(hwnd, CurveCellId(r, 1), NULL, FALSE);
+		m_ceBuf[profile][r].hystUp   = (int)::GetDlgItemInt(hwnd, CurveCellId(r, 2), NULL, FALSE);
+		m_ceBuf[profile][r].hystDown = (int)::GetDlgItemInt(hwnd, CurveCellId(r, 3), NULL, FALSE);
+	}
+}
+
+INT_PTR CALLBACK
+FANCONTROL::CurveDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+	FANCONTROL* self = (FANCONTROL*)::GetWindowLongPtr(hwnd, DWLP_USER);
+
+	switch (msg) {
+	case WM_INITDIALOG:
+		self = (FANCONTROL*)lp;
+		::SetWindowLongPtr(hwnd, DWLP_USER, (LONG_PTR)self);
+
+		// load both profiles into working buffers, show profile 1
+		self->CurveLoadProfileToBuf(0);
+		self->CurveLoadProfileToBuf(1);
+		self->m_ceProfile = 0;
+		::CheckRadioButton(hwnd, 9401, 9402, 9401);
+		::SetDlgItemTextA(hwnd, 9461, self->Fahrenheit ? "(\xb0" "F)" : "(\xb0" "C)");
+		self->CurveBufToGrid(hwnd, 0);
+
+		ApplyDarkToDialog(hwnd, self->DarkMode);
+		return TRUE;
+
+	case WM_CTLCOLORDLG:
+		if (self) return (INT_PTR)self->m_hbrDlg;
+		break;
+	case WM_CTLCOLORSTATIC:
+	case WM_CTLCOLORBTN:
+		if (self) {
+			::SetTextColor((HDC)wp, self->m_clrText);
+			::SetBkMode((HDC)wp, TRANSPARENT);
+			return (INT_PTR)self->m_hbrDlg;
+		}
+		break;
+	case WM_CTLCOLOREDIT:
+		if (self) {
+			::SetTextColor((HDC)wp, self->m_clrText);
+			::SetBkMode((HDC)wp, TRANSPARENT);
+			return (INT_PTR)self->m_hbrField;
+		}
+		break;
+
+	case WM_COMMAND:
+		if (!self) break;
+		switch (LOWORD(wp)) {
+		case 9401:   // profile 1 selected
+		case 9402: { // profile 2 selected
+			int want = (LOWORD(wp) == 9402) ? 1 : 0;
+			if (want != self->m_ceProfile) {
+				self->CurveGridToBuf(hwnd, self->m_ceProfile);   // keep current edits
+				self->m_ceProfile = want;
+				self->CurveBufToGrid(hwnd, want);
+			}
+			return TRUE;
+		}
+
+		case IDOK:
+		case 9460:   // Apply
+			self->CurveGridToBuf(hwnd, self->m_ceProfile);
+			if (self->CurveApplyAndSave()) {
+				if (LOWORD(wp) == IDOK) { ::EndDialog(hwnd, IDOK); return TRUE; }
+				// Apply: reload the now-canonical tables so the grid reflects any
+				// normalization (sorting, dropped blank rows) and re-theme.
+				self->CurveLoadProfileToBuf(0);
+				self->CurveLoadProfileToBuf(1);
+				self->CurveBufToGrid(hwnd, self->m_ceProfile);
+			}
+			return TRUE;
+
+		case IDCANCEL:
+			::EndDialog(hwnd, IDCANCEL);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+// validate both working buffers, commit them to SmartLevels1/2 (Celsius, sorted,
+// terminated), re-activate the live profile and persist to the ini. Returns false
+// (leaving live state untouched) if validation fails, after telling the user why.
+bool
+FANCONTROL::CurveApplyAndSave() {
+	bool f = this->Fahrenheit != 0;
+
+	// a row's fan byte must be a real EC level
+	auto fanOk = [](int v) {
+		return (v >= 0 && v <= 7) || v == 64 || v == 128;
+	};
+
+	// gather, convert and sort one profile; returns count, or -1 on a bad value
+	CURVEROW out[2][CURVE_ROWS];
+	int count[2] = { 0, 0 };
+	for (int p = 0; p < 2; p++) {
+		int n = 0;
+		for (int r = 0; r < CURVE_ROWS; r++) {
+			const CURVEROW& row = m_ceBuf[p][r];
+			if (row.temp == INT_MIN) continue;
+			int tC  = CurveFromDisplayTemp(row.temp, f);
+			int huC = CurveFromDisplayDelta(row.hystUp, f);
+			int hdC = CurveFromDisplayDelta(row.hystDown, f);
+			if (tC < 0 || tC > 150 || !fanOk(row.fan) ||
+			    huC < 0 || huC > 50 || hdC < 0 || hdC > 50) {
+				char m[160];
+				sprintf_s(m, sizeof(m),
+					"Profile %d has an invalid row.\n\n"
+					"Temp must be 0-150, Fan must be 0-7, 64 or 128,\n"
+					"and the hysteresis values 0-50.", p + 1);
+				::MessageBoxA(this->hwndDialog, m, "Fan curve", MB_ICONWARNING);
+				return false;
+			}
+			out[p][n].temp = tC; out[p][n].fan = row.fan;
+			out[p][n].hystUp = huC; out[p][n].hystDown = hdC;
+			n++;
+		}
+		// insertion-sort by temperature ascending (the Smart algorithm walks the
+		// table low->high), keeping the small table cheap and stable
+		for (int i = 1; i < n; i++) {
+			CURVEROW key = out[p][i];
+			int j = i - 1;
+			while (j >= 0 && out[p][j].temp > key.temp) { out[p][j + 1] = out[p][j]; j--; }
+			out[p][j + 1] = key;
+		}
+		count[p] = n;
+	}
+
+	if (count[0] < 1) {
+		::MessageBoxA(this->hwndDialog,
+			"Profile 1 needs at least one row (it is the active Smart curve).",
+			"Fan curve", MB_ICONWARNING);
+		return false;
+	}
+
+	// commit profile 1
+	for (int i = 0; i < count[0]; i++) {
+		this->SmartLevels1[i].temp1     = out[0][i].temp;
+		this->SmartLevels1[i].fan1      = out[0][i].fan;
+		this->SmartLevels1[i].hystUp1   = out[0][i].hystUp;
+		this->SmartLevels1[i].hystDown1 = out[0][i].hystDown;
+	}
+	this->SmartLevels1[count[0]].temp1 = -1;
+	this->SmartLevels1[count[0]].fan1  = 0x80;
+
+	// commit profile 2 (count 0 => "no second profile": temp2[0] = 0)
+	if (count[1] == 0) {
+		this->SmartLevels2[0].temp2 = 0;
+		this->SmartLevels2[0].fan2  = 0;
+	}
+	else {
+		for (int i = 0; i < count[1]; i++) {
+			this->SmartLevels2[i].temp2     = out[1][i].temp;
+			this->SmartLevels2[i].fan2      = out[1][i].fan;
+			this->SmartLevels2[i].hystUp2   = out[1][i].hystUp;
+			this->SmartLevels2[i].hystDown2 = out[1][i].hystDown;
+		}
+		this->SmartLevels2[count[1]].temp2 = -1;
+		this->SmartLevels2[count[1]].fan2  = 0x80;
+	}
+
+	// if profile 2 was the active one but is now empty, fall back to profile 1
+	if (this->IndSmartLevel == 1 && count[1] == 0)
+		this->IndSmartLevel = 0;
+
+	// refresh the live table from the edited profile and reset hysteresis state
+	this->ActivateSmartProfile(this->IndSmartLevel + 1);
+
+	// persist the new curves to the ini and re-run a Smart decision immediately
+	this->SaveCurves("TPFanControl.ini");
+	if (this->CurrentModeFromDialog() == 2)
+		::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
+	return true;
+}
+
+void FANCONTROL::ShowCurveDialog(HWND owner)
+{
+	// owner = the Settings dialog when opened from there (correct nested-modal
+	// enable/disable), else the main window for the tray-menu entry
+	::DialogBoxParam(this->hinstapp, MAKEINTRESOURCE(9400),
+		owner ? owner : this->hwndDialog, (DLGPROC)FANCONTROL::CurveDlgProc, (LPARAM)this);
 }
 
 void FANCONTROL::ProcessTextIcons(void) {

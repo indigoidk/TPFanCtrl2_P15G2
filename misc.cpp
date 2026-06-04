@@ -199,6 +199,82 @@ FANCONTROL::SaveWindowPos(const char* configfile) {
 }
 
 //-------------------------------------------------------------------------
+//  rewrite the Level= / Level2= curve lines from SmartLevels1 / SmartLevels2.
+//  The in-memory tables are Celsius; the ini stores the user's display unit, so
+//  values are converted back to Fahrenheit when in F mode (matching ReadConfig,
+//  and keeping the "first level >= 80 -> Fahrenheit" auto-detect consistent).
+//  The new lines replace the first existing run of each key, preserving position
+//  and every other line/comment; emptied profile 2 simply drops its Level2 lines.
+//-------------------------------------------------------------------------
+void
+FANCONTROL::SaveCurves(const char* configfile) {
+	bool f = this->Fahrenheit != 0;
+	auto dispT = [f](int c) { return f ? c * 9 / 5 + 32 : c; };   // temp C->display
+	auto dispD = [f](int c) { return f ? c * 9 / 5 : c; };        // delta C->display
+
+	FILE* fin = NULL;
+	if (fopen_s(&fin, configfile, "r") != 0 || !fin) {
+		this->Trace("SaveCurves: cannot open ini for reading");
+		return;
+	}
+	char tmpname[MAX_PATH];
+	sprintf_s(tmpname, sizeof(tmpname), "%s.tmp", configfile);
+	FILE* fout = NULL;
+	if (fopen_s(&fout, tmpname, "w") != 0 || !fout) {
+		fclose(fin);
+		this->Trace("SaveCurves: cannot open temp file for writing");
+		return;
+	}
+
+	const bool haveP2 = (this->SmartLevels2[0].temp2 != 0);
+
+	// emit one profile's "<key>=temp fan [hystUp hystDown]" lines (hyst omitted
+	// when both are zero, to keep the file tidy)
+	auto writeProfile = [&](const char* key, bool profile2) {
+		for (int i = 0; ; i++) {
+			int t   = profile2 ? this->SmartLevels2[i].temp2     : this->SmartLevels1[i].temp1;
+			if (t == -1) break;
+			int fan = profile2 ? this->SmartLevels2[i].fan2      : this->SmartLevels1[i].fan1;
+			int hu  = profile2 ? this->SmartLevels2[i].hystUp2   : this->SmartLevels1[i].hystUp1;
+			int hd  = profile2 ? this->SmartLevels2[i].hystDown2 : this->SmartLevels1[i].hystDown1;
+			if (hu != 0 || hd != 0)
+				fprintf(fout, "%s=%d %d %d %d\r\n", key, dispT(t), fan, dispD(hu), dispD(hd));
+			else
+				fprintf(fout, "%s=%d %d\r\n", key, dispT(t), fan);
+		}
+	};
+
+	char buf[1024];
+	bool wroteL = false, wroteL2 = false;
+	while (fgets(buf, sizeof(buf), fin)) {
+		char* s = buf;
+		while (*s == ' ' || *s == '\t') s++;
+
+		if (_strnicmp(s, "level2=", 7) == 0) {
+			if (!wroteL2) { if (haveP2) writeProfile("Level2", true); wroteL2 = true; }
+			continue;   // drop the original line
+		}
+		if (_strnicmp(s, "level=", 6) == 0) {
+			if (!wroteL) { writeProfile("Level", false); wroteL = true; }
+			continue;
+		}
+		fputs(buf, fout);
+	}
+	if (!wroteL)               writeProfile("Level", false);
+	if (!wroteL2 && haveP2)    writeProfile("Level2", true);
+
+	fclose(fin);
+	fclose(fout);
+
+	if (::MoveFileExA(tmpname, configfile, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+		this->Trace("Fan curve saved to TPFanControl.ini");
+	else {
+		this->Trace("SaveCurves: could not replace ini (original kept)");
+		remove(tmpname);
+	}
+}
+
+//-------------------------------------------------------------------------
 //  apply a saved window rect, but only if it is still visible on some monitor
 //  (guards against a position left off-screen by an unplugged display).
 //-------------------------------------------------------------------------

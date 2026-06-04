@@ -198,6 +198,23 @@ protected:
 	static INT_PTR CALLBACK SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 	void ApplySettingsFromDialog(HWND hwnd);   // shared by OK and Apply in the Settings dialog
 
+	// ---- Smart fan-curve editor (dialog 9400) ----------------------------------
+	// In-app grid editor for the Level= / Level2= curves, so they no longer need
+	// hand-editing in the ini. Both profiles are edited in working buffers; OK/Apply
+	// writes them to SmartLevels1/2, re-activates the live profile, and rewrites the
+	// ini curve lines (SaveCurves). Values are shown/edited in the display unit.
+	static const int CURVE_ROWS = 12;   // visible grid rows (>= any realistic curve)
+	struct CURVEROW { int temp, fan, hystUp, hystDown; };
+	CURVEROW m_ceBuf[2][CURVE_ROWS];    // [0]=profile 1, [1]=profile 2 working copies
+	int      m_ceProfile = 0;           // profile currently shown in the grid (0/1)
+	void ShowCurveDialog(HWND owner = NULL);   // owner defaults to the main window
+	static INT_PTR CALLBACK CurveDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+	void CurveLoadProfileToBuf(int profile);   // SmartLevels{1,2} -> m_ceBuf (display unit)
+	void CurveBufToGrid(HWND hwnd, int profile);   // m_ceBuf -> edit boxes
+	void CurveGridToBuf(HWND hwnd, int profile);   // edit boxes -> m_ceBuf
+	bool CurveApplyAndSave();                  // validate m_ceBuf -> SmartLevels{1,2}, re-activate, persist
+	void SaveCurves(const char* filename);     // rewrite Level=/Level2= ini lines from SmartLevels{1,2}
+
 	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
 	char m_tempListSig[2048] = "";   // cache: skip RichEdit rebuild when nothing visible changed
 
