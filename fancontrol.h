@@ -177,6 +177,10 @@ protected:
 	HBRUSH m_hbrDlg;     // modern flat dialog/static background
 	HBRUSH m_hbrField;   // editable field background
 	COLORREF m_clrText;  // current theme text color
+	HFONT  m_hFontHdr;   // bold section-header font (replaces group-box frames)
+	HFONT  m_hFontBig;   // semibold font for the State / Fan readouts
+	HFONT  m_hFontTitle; // larger semibold font for the "TPFanControl = ..." line
+	HFONT  m_hFontDlg;   // DPI-rescaled base font for the rest (PerMonitorV2)
 	int m_fullW;         // full window width (captured once) for log auto-shrink
 	// resize/reflow layout state
 	BOOL m_layoutInit;   // base geometry captured yet?
@@ -184,6 +188,10 @@ protected:
 	int  m_minW, m_minH;       // minimum window size (= design size)
 	RECT m_baseRC[17];   // design-time control rects (client coords)
 	void ReflowLayout();       // re-anchor controls on WM_SIZE
+	// PerMonitorV2 DPI state
+	UINT m_curDpi;       // current window DPI (96 = 100%)
+	BOOL m_inDpiChange;  // guard: suppress reflow while rescaling for a DPI change
+	void RescaleForDpi(UINT newDpi, const RECT* suggested);  // WM_DPICHANGED handler
 
 	// rolling history of MaxTemp for the in-dialog sparkline (owner-draw static 8120)
 	static const int TEMPHIST_MAX = 120;   // samples kept (~10 min at Cycle=5s)

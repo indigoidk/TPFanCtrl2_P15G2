@@ -30,8 +30,8 @@ EXSTYLE WS_EX_TOPMOST | WS_EX_TOOLWINDOW
 CAPTION "TPFanControl v2.33 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Fan Control",IDC_STATIC,97,7,157,134
-    LTEXT           "TPControlFAN",8115,103,16,145,8
+    LTEXT           "Fan Control",9210,99,7,120,9
+    CTEXT           "TPControlFAN",8115,103,15,145,13
     LTEXT           "State",IDC_STATIC,103,36,21,8
     EDITTEXT        8100,126,34,121,13,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Switch",IDC_STATIC,103,52,21,8
@@ -47,13 +47,13 @@ BEGIN
     EDITTEXT        8310,171,105,32,14,ES_AUTOHSCROLL | ES_NUMBER
     LTEXT           "0-7, 64=max",IDC_STATIC,207,107,46,8
     CONTROL         "",8311,"msctls_trackbar32",TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP,103,126,148,11
-    GROUPBOX        "Temperatures",9198,7,7,85,172
+    LTEXT           "Temperatures",9198,9,7,80,9
     CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,70,148
-    GROUPBOX        "Status",9199,97,145,157,48
+    LTEXT           "Status",9199,99,145,120,9
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Last change",9196,103,169,50,8
     EDITTEXT        8113,103,179,145,12,ES_AUTOHSCROLL | ES_READONLY
-    GROUPBOX        "Log (see TPFanControl.log)",9201,260,7,303,172
+    LTEXT           "Log (see TPFanControl.log)",9201,262,7,200,9
     EDITTEXT        9200,269,18,287,156,ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_READONLY | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL
     CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,20,181,20,10
     CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,45,181,31,10
@@ -62,7 +62,7 @@ BEGIN
     CONTROL         "Show log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,57,201,47,10
     CONTROL         "Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,107,201,50,10
     CONTROL         "Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,160,201,100,10
-    GROUPBOX        "Temperature history",9202,7,214,556,32
+    LTEXT           "Temperature history",9202,9,214,160,9
     CONTROL         "",8120,"Static",SS_OWNERDRAW,12,224,546,18
 END
 
@@ -96,8 +96,8 @@ STYLE DS_SETFONT | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CAPTION 
 CAPTION "TPFanControl v2.33 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Fan Control",IDC_STATIC,97,7,155,134
-    LTEXT           "TPControlFAN",8115,103,16,145,8
+    LTEXT           "Fan Control",9210,99,7,120,9
+    CTEXT           "TPControlFAN",8115,103,15,145,13
     LTEXT           "State",IDC_STATIC,103,36,21,8
     EDITTEXT        8100,126,34,121,13,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Switch",IDC_STATIC,103,52,21,8
@@ -113,13 +113,13 @@ BEGIN
     EDITTEXT        8310,171,105,25,14,ES_AUTOHSCROLL | ES_NUMBER
     LTEXT           "0-7, 64=max",IDC_STATIC,199,107,46,8
     CONTROL         "",8311,"msctls_trackbar32",TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP,103,126,145,11
-    GROUPBOX        "Temperatures",9198,7,7,85,172
+    LTEXT           "Temperatures",9198,9,7,80,9
     CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,70,148
-    GROUPBOX        "Status",9199,97,145,157,48
+    LTEXT           "Status",9199,99,145,120,9
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Last change",9196,103,169,50,8
     EDITTEXT        8113,103,179,145,12,ES_AUTOHSCROLL | ES_READONLY
-    GROUPBOX        "Log (see TPFanControl.log)",9201,256,7,307,172
+    LTEXT           "Log (see TPFanControl.log)",9201,258,7,200,9
     EDITTEXT        9200,266,18,290,156,ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_READONLY | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL
     CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,21,181,20,10
     CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,46,181,31,10
@@ -128,7 +128,7 @@ BEGIN
     CONTROL         "Show log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,57,201,47,10
     CONTROL         "Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,107,201,50,10
     CONTROL         "Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,160,201,100,10
-    GROUPBOX        "Temperature history",9202,7,214,556,32
+    LTEXT           "Temperature history",9202,9,214,160,9
     CONTROL         "",8120,"Static",SS_OWNERDRAW,12,224,546,18
 END
 

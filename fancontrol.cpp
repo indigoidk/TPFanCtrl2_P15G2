@@ -20,6 +20,13 @@
 #include "taskbartexticon.h"
 #include "sysinfoapi.h"
 
+// WM_DPICHANGED arrived in the Win8.1 SDK headers (_WIN32_WINNT >= 0x0603);
+// this app targets Vista (0x0600), so define it locally. The message is simply
+// ignored by pre-8.1 systems, which never send it.
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
 
 DEFINE_GUID(GUID_LIDSWITCH_STATE_CHANGE,
     0xba3e0f4d, 0xb817, 0x4094,
@@ -126,6 +133,12 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	}
 	this->m_hbrDlg = NULL;
 	this->m_hbrField = NULL;
+	this->m_hFontHdr = NULL;
+	this->m_hFontBig = NULL;
+	this->m_hFontTitle = NULL;
+	this->m_hFontDlg = NULL;
+	this->m_curDpi = 0;
+	this->m_inDpiChange = FALSE;
 	this->m_clrText = RGB(32, 32, 32);
 	this->m_fullW = 0;
 	this->m_layoutInit = FALSE;
@@ -347,6 +360,14 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	// restore the main window to where the user last left it (on-screen only)
 	this->RestoreWindowPos();
 
+	// Log panel defaults to closed on every startup. RestoreWindowPos() may have
+	// forced a saved width that disagrees with the checkbox, so collapse the panel
+	// and re-sync the width here -- this also fixes the old bug where the box read
+	// "checked" but the panel stayed clipped until you toggled it off and on.
+	this->ShowLog = 0;
+	::SendDlgItemMessage(this->hwndDialog, 7011, BM_SETCHECK, BST_UNCHECKED, 0);
+	this->ApplyLogVisibility();
+
 	//  wait xx seconds to start tpfc while booting to save icon
 	char bufsec[1024] = "";
 	ULONGLONG tickCount = GetTickCount64();   // 64-bit: no ~49-day wrap on long uptimes
@@ -538,6 +559,10 @@ FANCONTROL::~FANCONTROL() {
 
 	if (this->m_hbrDlg) ::DeleteObject(this->m_hbrDlg);
 	if (this->m_hbrField) ::DeleteObject(this->m_hbrField);
+	if (this->m_hFontHdr) ::DeleteObject(this->m_hFontHdr);
+	if (this->m_hFontBig) ::DeleteObject(this->m_hFontBig);
+	if (this->m_hFontTitle) ::DeleteObject(this->m_hFontTitle);
+	if (this->m_hFontDlg) ::DeleteObject(this->m_hFontDlg);
 
 	if (pTextIconMutex)
 		delete pTextIconMutex;
@@ -769,6 +794,41 @@ FANCONTROL::ApplyTheme() {
 void
 FANCONTROL::InitThemeAndChrome() {
 	if (!this->hwndDialog) return;
+
+	// --- modern font hierarchy ------------------------------------------------
+	// Bold section headers (they replace the old group-box frames) and a larger
+	// semibold font on the primary readouts (State / Fan-speed). Sized in points
+	// against the window DPI so they stay crisp; recreated on a DPI change.
+	{
+		HDC hdc = ::GetDC(this->hwndDialog);
+		int dpiY = hdc ? ::GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+		if (hdc) ::ReleaseDC(this->hwndDialog, hdc);
+		this->m_curDpi = (UINT)dpiY;   // PerMonitorV2 baseline for later WM_DPICHANGED
+		if (this->m_hFontHdr)   { ::DeleteObject(this->m_hFontHdr);   this->m_hFontHdr = NULL; }
+		if (this->m_hFontBig)   { ::DeleteObject(this->m_hFontBig);   this->m_hFontBig = NULL; }
+		if (this->m_hFontTitle) { ::DeleteObject(this->m_hFontTitle); this->m_hFontTitle = NULL; }
+		this->m_hFontHdr = ::CreateFontA(-::MulDiv(9, dpiY, 72), 0, 0, 0, FW_BOLD,
+			0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+			CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+		this->m_hFontBig = ::CreateFontA(-::MulDiv(10, dpiY, 72), 0, 0, 0, FW_SEMIBOLD,
+			0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+			CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+		this->m_hFontTitle = ::CreateFontA(-::MulDiv(12, dpiY, 72), 0, 0, 0, FW_SEMIBOLD,
+			0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+			CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+		static const int hdrIds[] = { 9210, 9198, 9199, 9201, 9202 };  // section headers
+		for (int i = 0; i < (int)(sizeof(hdrIds) / sizeof(hdrIds[0])); i++) {
+			HWND h = ::GetDlgItem(this->hwndDialog, hdrIds[i]);
+			if (h && this->m_hFontHdr) ::SendMessage(h, WM_SETFONT, (WPARAM)this->m_hFontHdr, TRUE);
+		}
+		static const int bigIds[] = { 8100, 8102, 8104 };  // State / Fan1 / Fan2 readouts
+		for (int i = 0; i < (int)(sizeof(bigIds) / sizeof(bigIds[0])); i++) {
+			HWND h = ::GetDlgItem(this->hwndDialog, bigIds[i]);
+			if (h && this->m_hFontBig) ::SendMessage(h, WM_SETFONT, (WPARAM)this->m_hFontBig, TRUE);
+		}
+		HWND hTitle = ::GetDlgItem(this->hwndDialog, 8115);   // "TPFanControl = ..." line
+		if (hTitle && this->m_hFontTitle) ::SendMessage(hTitle, WM_SETFONT, (WPARAM)this->m_hFontTitle, TRUE);
+	}
 
 	// two/three aligned columns in the temperature list (name | temp | hex)
 	// RichEdit uses PARAFORMAT2 tab stops (in twips: ~40 and ~80 dialog units)
@@ -1045,13 +1105,13 @@ FANCONTROL::ReflowLayout() {
 
 	// id, then anchor flags: add dW to x/w, dH to y/h
 	static const struct { int id, ax, ay, aw, ah; } A[17] = {
-		{ 9198, 0, 0, 0, 1 },   // Temperatures group: grow height
+		{ 9198, 0, 0, 0, 0 },   // 'Temperatures' header: fixed top-left
 		{ 8101, 0, 0, 0, 1 },   // temperature list:   grow height
 		{ 7001, 0, 1, 0, 0 },   // 'all'    radio: follow bottom
 		{ 7002, 0, 1, 0, 0 },   // 'active' radio: follow bottom
-		{ 9201, 0, 0, 1, 1 },   // Log group: grow width + height
+		{ 9201, 0, 0, 0, 0 },   // 'Log' header: fixed top-left
 		{ 9200, 0, 0, 1, 1 },   // log edit:  grow width + height
-		{ 9199, 0, 1, 0, 0 },   // Status group: follow bottom (fixed width)
+		{ 9199, 0, 1, 0, 0 },   // 'Status' header: follow bottom
 		{ 8112, 0, 1, 0, 0 },   // status text:  follow bottom (fixed width)
 		{ 9196, 0, 1, 0, 0 },   // 'Last' label: follow bottom
 		{ 8113, 0, 1, 0, 0 },   // last text:    follow bottom (fixed width)
@@ -1059,7 +1119,7 @@ FANCONTROL::ReflowLayout() {
 		{ 7011, 0, 1, 0, 0 },   // Show log checkbox: follow bottom
 		{ 7012, 0, 1, 0, 0 },   // Dark mode checkbox: follow bottom
 		{ 7013, 0, 1, 0, 0 },   // Game mode checkbox: follow bottom
-		{ 9202, 0, 1, 1, 0 },   // Temp history group: follow bottom, grow width
+		{ 9202, 0, 1, 0, 0 },   // 'Temperature history' header: follow bottom
 		{ 8120, 0, 1, 1, 0 },   // sparkline:          follow bottom, grow width
 		{ 5100, 0, 1, 0, 0 },   // Settings button: follow bottom (fixed pos/size)
 	};
@@ -1120,6 +1180,94 @@ FANCONTROL::ReflowLayout() {
 	}
 	if (hdwp) ::EndDeferWindowPos(hdwp);
 
+	::InvalidateRect(this->hwndDialog, NULL, TRUE);
+}
+
+//-------------------------------------------------------------------------
+//  PerMonitorV2 DPI change: scale every child's rect by the DPI ratio and
+//  resize the window to the OS-suggested rectangle, then rebuild the fonts
+//  at the new DPI. Only runs when the window actually moves to a monitor
+//  with a different scale factor; on a single-DPI setup this never fires.
+//-------------------------------------------------------------------------
+struct DPISCALECTX { HWND parent; double s; };
+
+static BOOL CALLBACK DpiScaleChildProc(HWND h, LPARAM lp) {
+	DPISCALECTX* c = (DPISCALECTX*)lp;
+	RECT r;
+	::GetWindowRect(h, &r);
+	::MapWindowPoints(NULL, c->parent, (LPPOINT)&r, 2);
+	int x  = (int)(r.left * c->s + 0.5);
+	int y  = (int)(r.top  * c->s + 0.5);
+	int w  = (int)((r.right  - r.left) * c->s + 0.5);
+	int hh = (int)((r.bottom - r.top ) * c->s + 0.5);
+	::SetWindowPos(h, NULL, x, y, w, hh, SWP_NOZORDER | SWP_NOACTIVATE);
+	return TRUE;
+}
+
+static BOOL CALLBACK SetFontChildProc(HWND h, LPARAM lp) {
+	::SendMessage(h, WM_SETFONT, (WPARAM)lp, TRUE);
+	return TRUE;
+}
+
+void
+FANCONTROL::RescaleForDpi(UINT newDpi, const RECT* suggested) {
+	if (!this->hwndDialog || newDpi == 0) return;
+	UINT oldDpi = this->m_curDpi ? this->m_curDpi : 96;
+	if (newDpi == oldDpi) return;
+
+	this->m_inDpiChange = TRUE;   // suppress the reflow that WM_SIZE would trigger
+
+	// 1. move/resize the window to the rectangle Windows recommends for the new DPI
+	if (suggested)
+		::SetWindowPos(this->hwndDialog, NULL,
+			suggested->left, suggested->top,
+			suggested->right - suggested->left, suggested->bottom - suggested->top,
+			SWP_NOZORDER | SWP_NOACTIVATE);
+
+	// 2. scale every child control's position + size by the DPI ratio
+	double s = (double)newDpi / (double)oldDpi;
+	DPISCALECTX ctx = { this->hwndDialog, s };
+	::EnumChildWindows(this->hwndDialog, DpiScaleChildProc, (LPARAM)&ctx);
+
+	// 3. rebuild fonts at the new DPI: a base font for the bulk of the controls
+	//    plus the bold header / large readout fonts
+	this->m_curDpi = newDpi;
+	if (this->m_hFontDlg)   { ::DeleteObject(this->m_hFontDlg);   this->m_hFontDlg = NULL; }
+	if (this->m_hFontHdr)   { ::DeleteObject(this->m_hFontHdr);   this->m_hFontHdr = NULL; }
+	if (this->m_hFontBig)   { ::DeleteObject(this->m_hFontBig);   this->m_hFontBig = NULL; }
+	if (this->m_hFontTitle) { ::DeleteObject(this->m_hFontTitle); this->m_hFontTitle = NULL; }
+	this->m_hFontDlg = ::CreateFontA(-::MulDiv(9, newDpi, 72), 0, 0, 0, FW_NORMAL,
+		0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+	this->m_hFontHdr = ::CreateFontA(-::MulDiv(9, newDpi, 72), 0, 0, 0, FW_BOLD,
+		0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+	this->m_hFontBig = ::CreateFontA(-::MulDiv(10, newDpi, 72), 0, 0, 0, FW_SEMIBOLD,
+		0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+	this->m_hFontTitle = ::CreateFontA(-::MulDiv(12, newDpi, 72), 0, 0, 0, FW_SEMIBOLD,
+		0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
+	if (this->m_hFontDlg)
+		::EnumChildWindows(this->hwndDialog, SetFontChildProc, (LPARAM)this->m_hFontDlg);
+	static const int hdrIds[] = { 9210, 9198, 9199, 9201, 9202 };
+	for (int i = 0; i < (int)(sizeof(hdrIds) / sizeof(hdrIds[0])); i++) {
+		HWND h = ::GetDlgItem(this->hwndDialog, hdrIds[i]);
+		if (h && this->m_hFontHdr) ::SendMessage(h, WM_SETFONT, (WPARAM)this->m_hFontHdr, TRUE);
+	}
+	static const int bigIds[] = { 8100, 8102, 8104 };
+	for (int i = 0; i < (int)(sizeof(bigIds) / sizeof(bigIds[0])); i++) {
+		HWND h = ::GetDlgItem(this->hwndDialog, bigIds[i]);
+		if (h && this->m_hFontBig) ::SendMessage(h, WM_SETFONT, (WPARAM)this->m_hFontBig, TRUE);
+	}
+	HWND hTitle = ::GetDlgItem(this->hwndDialog, 8115);
+	if (hTitle && this->m_hFontTitle) ::SendMessage(hTitle, WM_SETFONT, (WPARAM)this->m_hFontTitle, TRUE);
+
+	// 4. re-baseline the reflow system at the new DPI/size, then repaint
+	this->m_layoutInit = FALSE;
+	this->m_fullW = 0;
+	this->m_inDpiChange = FALSE;
+	this->ReflowLayout();   // recapture design geometry at the new scale
 	::InvalidateRect(this->hwndDialog, NULL, TRUE);
 }
 
@@ -2079,9 +2227,15 @@ FANCONTROL::DlgProc(HWND
 		if (mp1 == SIZE_MINIMIZED && this->MinimizeToSysTray) {
 			::ShowWindow(this->hwndDialog, FALSE);
 		}
-		else {
+		else if (!this->m_inDpiChange) {   // RescaleForDpi handles its own layout
 			this->ReflowLayout();
 		}
+		rc = TRUE;
+		break;
+
+	case WM_DPICHANGED:
+		// PerMonitorV2: lo-word of wParam = new DPI, lParam = suggested window rect
+		this->RescaleForDpi(LOWORD(mp1), (const RECT*)mp2);
 		rc = TRUE;
 		break;
 
