@@ -43,6 +43,7 @@ FANCONTROL::SaveConfig(const char* configfile)
 		{ "ShowBiasedTemps",this->ShowBiasedTemps },
 		{ "Lev64Norm",      this->Lev64Norm },
 		{ "NoExtSensor",    this->NoExtSensor },
+		{ "FailsafeTemp",   this->FailsafeTemp },   // deg C, 0 = off
 	};
 	const int N = (int)(sizeof(items) / sizeof(items[0]));
 	bool done[32] = { false };
@@ -547,6 +548,11 @@ FANCONTROL::ReadConfig(const char* configfile)
 				continue;
 			}
 
+			if (_strnicmp(buf, "FailsafeTemp=", 13) == 0) {
+				this->FailsafeTemp = atoi(buf + 13);   // deg C, 0 = disabled
+				continue;
+			}
+
 			if (_strnicmp(buf, "ShowBiasedTemps=", 16) == 0) {
 				this->ShowBiasedTemps = atoi(buf + 16);
 				continue;
@@ -750,7 +756,12 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"IconLevels=50 65 78\r\n"
 				"\r\n"
 				"# Leave Manual mode if temperature reaches this (deg C)\r\n"
-				"ManModeExit=80\r\n",
+				"ManModeExit=80\r\n"
+				"\r\n"
+				"# Thermal fail-safe: force fan level 7 when the max temperature\r\n"
+				"# reaches this (deg C), in Smart/Manual mode, until ~3 deg below.\r\n"
+				"# 0 = disabled.\r\n"
+				"FailsafeTemp=0\r\n",
 				fnew);
 			fclose(fnew);
 			this->Trace("TPFanControl.ini not found - created a default one");

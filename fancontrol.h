@@ -147,6 +147,8 @@ protected:
 	int EC_CTRL, EC_DATA;
 	int ManModeExit;
 	int ManModeExitInternal;
+	int FailsafeTemp = 0;          // thermal fail-safe threshold in Celsius (0 = off)
+	bool m_failsafeTripped = false;   // true while the fail-safe is holding the fan at max
 	int ShowBiasedTemps;
 	int SecStartDelay;
 	char gSensorNames[17][4];

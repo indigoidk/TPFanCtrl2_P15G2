@@ -157,7 +157,7 @@ BEGIN
 END
 
 
-9300 DIALOGEX 0, 0, 230, 330
+9300 DIALOGEX 0, 0, 230, 366
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "TPFanControl Settings"
 FONT 9, "Segoe UI", 400, 0, 0x1
@@ -190,10 +190,14 @@ BEGIN
     CONTROL         "Apply sensor offsets to displayed temperatures",9322,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,269,205,10
     CONTROL         "Treat fan level 64 as normal (not maximum)",9323,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,282,205,10
     CONTROL         "Skip external / secondary temp sensors",9324,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,295,205,10
-    PUSHBUTTON      "Fan curve...",9330,7,309,52,14
-    DEFPUSHBUTTON   "OK",IDOK,65,309,48,14
-    PUSHBUTTON      "Apply",9320,118,309,48,14
-    PUSHBUTTON      "Cancel",IDCANCEL,171,309,48,14
+    GROUPBOX        "Safety",IDC_STATIC,7,306,216,30
+    LTEXT           "Force fan 7 when max temp reaches (0 = off):",IDC_STATIC,14,319,170,8
+    EDITTEXT        9325,165,317,30,13,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "",9326,199,319,16,8
+    PUSHBUTTON      "Fan curve...",9330,7,345,52,14
+    DEFPUSHBUTTON   "OK",IDOK,65,345,48,14
+    PUSHBUTTON      "Apply",9320,118,345,48,14
+    PUSHBUTTON      "Cancel",IDCANCEL,171,345,48,14
 END
 
 

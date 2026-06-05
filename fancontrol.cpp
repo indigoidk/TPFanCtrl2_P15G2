@@ -2337,6 +2337,14 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			::SetDlgItemTextA(hwnd, 9319, self->Fahrenheit ? "(\xb0" "F)" : "(\xb0" "C)");
 		}
 
+		// thermal fail-safe threshold (stored Celsius; shown in the display unit)
+		{
+			int fs = self->FailsafeTemp;
+			if (self->Fahrenheit && fs > 0) fs = fs * 9 / 5 + 32;
+			::SetDlgItemInt(hwnd, 9325, fs, FALSE);
+			::SetDlgItemTextA(hwnd, 9326, self->Fahrenheit ? "\xb0" "F" : "\xb0" "C");
+		}
+
 		// match the main window's full dark theme (titlebar + child controls so
 		// checkbox/label text is white in dark mode, not theme-drawn black)
 		ApplyDarkToDialog(hwnd, self->DarkMode);
@@ -2386,6 +2394,10 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				"not flagged as a max-speed condition.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9324,
 				"Ignore external / secondary temperature sensors when reading temps.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9325,
+				"Thermal fail-safe: if the max temperature reaches this value (in "
+				"Smart or Manual mode), the fan is forced to level 7 until it cools "
+				"~3 degrees below. 0 disables it. Independent of the fan curve.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9330,
 				"Open the Smart fan-curve editor (temperature -> fan level table).");
 		}
@@ -2497,6 +2509,20 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 				this->IconLevels[1] = v1;
 				this->IconLevels[2] = v2;
 			}
+		}
+	}
+
+	// thermal fail-safe threshold (field is in the display unit -> store Celsius;
+	// 0 = off, otherwise clamp to a sane ceiling)
+	{
+		BOOL okfs = FALSE;
+		int fs = (int)::GetDlgItemInt(hwnd, 9325, &okfs, FALSE);
+		if (okfs) {
+			if (this->Fahrenheit && fs > 0) fs = (fs - 32) * 5 / 9;
+			if (fs < 0)   fs = 0;
+			if (fs > 120) fs = 120;
+			this->FailsafeTemp = fs;
+			if (fs == 0) this->m_failsafeTripped = false;   // disabling clears any trip
 		}
 	}
 

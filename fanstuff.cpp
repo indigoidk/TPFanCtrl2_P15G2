@@ -204,9 +204,13 @@ FANCONTROL::HandleData(void) {
 			"%s\r\nMax %d\xb0%s   Fan %s   %d/%d rpm",
 			modeStr, dT, unit, fanStr, this->fan1speed, this->fan2speed);
 
-		char extra[48] = "";
-		if (this->m_driversHidden)
-			strcpy_s(extra, sizeof(extra), "Game mode");
+		char extra[64] = "";
+		if (this->m_failsafeTripped)
+			strcpy_s(extra, sizeof(extra), "FAIL-SAFE: fan forced max");
+		if (this->m_driversHidden) {
+			if (extra[0]) strcat_s(extra, sizeof(extra), "   ");
+			strcat_s(extra, sizeof(extra), "Game mode");
+		}
 		if (this->m_ecErrorsTotal > 0) {
 			if (extra[0]) strcat_s(extra, sizeof(extra), "   ");
 			sprintf_s(extra + strlen(extra), sizeof(extra) - strlen(extra),
@@ -315,6 +319,24 @@ FANCONTROL::HandleData(void) {
 	}
 
 	this->PreviousMode = this->CurrentMode;
+
+	// thermal fail-safe (Smart/Manual only): if the max temperature reaches
+	// FailsafeTemp, force the top fan level regardless of the curve/manual level,
+	// and hold it until ~3 C below (hysteresis). Guards against a curve or a stuck
+	// manual level that would otherwise let the machine overheat.
+	if (this->FailsafeTemp > 0 && this->ActiveMode &&
+		(this->CurrentMode == 2 || this->CurrentMode == 3)) {
+		if (!this->m_failsafeTripped && this->MaxTemp >= this->FailsafeTemp)
+			this->m_failsafeTripped = true;
+		else if (this->m_failsafeTripped && this->MaxTemp <= this->FailsafeTemp - 3)
+			this->m_failsafeTripped = false;
+
+		if (this->m_failsafeTripped && this->State.FanCtrl != 7)
+			ok = this->SetFan("Fail-safe: max temp reached, forcing fan 7", 7);
+	}
+	else if (this->m_failsafeTripped) {
+		this->m_failsafeTripped = false;   // mode left Smart/Manual: clear the trip
+	}
 
 	if (this->CurrentMode == 3 && this->MaxTemp > this->ManModeExitInternal)
 		this->CurrentMode = 2;
