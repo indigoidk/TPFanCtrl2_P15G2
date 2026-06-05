@@ -47,7 +47,7 @@ below). Code version string: `2.33 P15G2 Dual`.
 - **Dark mode**, per-monitor **DPI** scaling, and a resizable window.
 - **Game Mode** — temporarily hides the TVicPort kernel-driver files so
   anti-cheat (e.g. Riot Vanguard) doesn't flag them; restored automatically on
-  exit/shutdown. See [`ToggleDrivers.ps1`](ToggleDrivers.ps1).
+  exit/shutdown.
 - Optional logging to `TPFanControl.log` and CSV; °C/°F display.
 
 ## Requirements
