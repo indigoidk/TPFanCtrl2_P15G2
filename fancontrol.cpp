@@ -346,8 +346,8 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	                   "and slider below. The fan will not auto-adjust.");
 	this->AddTip(8310, "Manual fan level: 0 = off, 1-7 = increasing speed, "
 	                   "64 = maximum. Typing here switches to Manual mode.");
-	this->AddTip(8311, "Drag to set the manual fan level (0-7, far right = max). "
-	                   "Using the slider switches to Manual mode.");
+	this->AddTip(8311, "Drag to set the manual fan level: 0 = off, 1-7 = increasing "
+	                   "speed, far right = MAX. Using the slider switches to Manual mode.");
 	this->AddTip(8101, "Per-sensor temperatures. 'active' shows only sensors with a "
 	                   "live reading; 'all' lists every EC sensor slot.");
 	this->AddTip(8120, "Temperature history sparkline of the max sensor. Shows current, "
@@ -1067,15 +1067,31 @@ FANCONTROL::UpdateTempList() {
 	::SendMessage(hRich, WM_SETREDRAW, FALSE, 0);
 	::SetWindowText(hRich, "");
 
-	// Set paragraph tab stops (name col | temp col | hex col)
+	// Set paragraph tab stops: 'Temp' (and optional 'Hex') columns centered
 	::SendMessage(hRich, EM_SETSEL, 0, -1);
 	PARAFORMAT2 pf = {};
 	pf.cbSize = sizeof(PARAFORMAT2);
 	pf.dwMask = PFM_TABSTOPS;
 	pf.cTabCount = 2;
-	pf.rgxTabs[0] = 840;
-	pf.rgxTabs[1] = 1680;
+	pf.rgxTabs[0] = 1150 | (1 << 24);   // 'Temp' column: centered tab
+	pf.rgxTabs[1] = 1600 | (1 << 24);   // 'Hex'  column: centered tab
 	::SendMessage(hRich, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
+
+	// bold column header over the value columns ("Location  Temp [ Hex ]")
+	{
+		const char* hdr = this->ShowTempHex
+			? "Location\tTemp\tHex\r\n"
+			: "Location\tTemp\r\n";
+		int len = ::GetWindowTextLength(hRich);
+		::SendMessage(hRich, EM_SETSEL, len, len);
+		CHARFORMAT cf = {};
+		cf.cbSize = sizeof(CHARFORMAT);
+		cf.dwMask = CFM_COLOR | CFM_BOLD;
+		cf.dwEffects = CFE_BOLD;
+		cf.crTextColor = this->m_clrText;
+		::SendMessage(hRich, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+		::SendMessage(hRich, EM_REPLACESEL, FALSE, (LPARAM)hdr);
+	}
 
 	for (int r = 0; r < nrows; r++) {
 		int len = ::GetWindowTextLength(hRich);
@@ -1083,7 +1099,8 @@ FANCONTROL::UpdateTempList() {
 
 		CHARFORMAT cf = {};
 		cf.cbSize = sizeof(CHARFORMAT);
-		cf.dwMask = CFM_COLOR;
+		cf.dwMask = CFM_COLOR | CFM_BOLD;   // clear bold so rows aren't bold like the header
+		cf.dwEffects = 0;
 		cf.crTextColor = rows[r].color;
 		::SendMessage(hRich, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
 
@@ -1094,6 +1111,42 @@ FANCONTROL::UpdateTempList() {
 	::SendMessage(hRich, EM_SCROLLCARET, 0, 0);
 	::SendMessage(hRich, WM_SETREDRAW, TRUE, 0);
 	::InvalidateRect(hRich, NULL, TRUE);
+
+	// ---- auto-size the list to its content (header + visible rows) and tuck
+	//      the all/active radios just beneath it. Runs only when the rendered
+	//      set actually changed (we're past the signature early-out), so this
+	//      grows on 'all' and shrinks on 'active'. ReflowLayout() leaves these
+	//      three controls alone so the two don't fight.
+	{
+		HDC dc = ::GetDC(hRich);
+		HFONT hf  = (HFONT)::SendMessage(hRich, WM_GETFONT, 0, 0);
+		HFONT old = hf ? (HFONT)::SelectObject(dc, hf) : NULL;
+		TEXTMETRIC tm;
+		::GetTextMetrics(dc, &tm);
+		if (old) ::SelectObject(dc, old);
+		::ReleaseDC(hRich, dc);
+
+		int lineH = tm.tmHeight + tm.tmExternalLeading;
+		int wantH = (nrows + 1) * lineH + 8;   // +1 for the header row, + padding
+
+		RECT rl;
+		::GetWindowRect(hRich, &rl);
+		::MapWindowPoints(NULL, this->hwndDialog, (LPPOINT)&rl, 2);
+
+		::SetWindowPos(hRich, NULL, 0, 0, rl.right - rl.left, wantH,
+			SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+		int radioTop = rl.top + wantH + 4;
+		for (int id = 7001; id <= 7002; id++) {
+			HWND hr = ::GetDlgItem(this->hwndDialog, id);
+			if (!hr) continue;
+			RECT rr;
+			::GetWindowRect(hr, &rr);
+			::MapWindowPoints(NULL, this->hwndDialog, (LPPOINT)&rr, 2);
+			::SetWindowPos(hr, NULL, rr.left, radioTop, 0, 0,
+				SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+	}
 }
 
 //-------------------------------------------------------------------------
@@ -1167,6 +1220,10 @@ FANCONTROL::ReflowLayout() {
 	for (int i = 0; i < 17; i++) {
 		HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 		if (!h) continue;
+		// the temp list + all/active radios are sized to their content by
+		// UpdateTempList(); don't let the resize reflow fight that.
+		if (A[i].id == 8101 || A[i].id == 7001 || A[i].id == 7002)
+			continue;
 		const RECT& b = this->m_baseRC[i];
 		int x = b.left + (A[i].ax ? dW : 0);
 		int y = b.top + (A[i].ay ? dH : 0);
@@ -1267,6 +1324,7 @@ FANCONTROL::RescaleForDpi(UINT newDpi, const RECT* suggested) {
 	this->m_layoutInit = FALSE;
 	this->m_fullW = 0;
 	this->m_inDpiChange = FALSE;
+	this->m_tempListSig[0] = '\0';   // force UpdateTempList to re-apply the content height at the new DPI
 	this->ReflowLayout();   // recapture design geometry at the new scale
 	::InvalidateRect(this->hwndDialog, NULL, TRUE);
 }
@@ -1742,6 +1800,36 @@ FANCONTROL::DlgProc(HWND
 			rc = TRUE;
 			break;
 		}
+		if (dis && dis->CtlType == ODT_STATIC && dis->CtlID == 8115) {
+			// "TPControlFAN = On/OFF": draw the prefix in the theme text color
+			// and color only the state word (green when fan control is active).
+			bool on = (this->CurrentMode == 2 || this->CurrentMode == 3);
+			const char* pre = "TPControlFAN = ";
+			const char* st  = on ? "On" : "OFF";
+
+			::FillRect(dis->hDC, &dis->rcItem, this->m_hbrDlg);
+			::SetBkMode(dis->hDC, TRANSPARENT);
+
+			HFONT hf  = (HFONT)::SendMessage(dis->hwndItem, WM_GETFONT, 0, 0);
+			HFONT old = hf ? (HFONT)::SelectObject(dis->hDC, hf) : NULL;
+
+			SIZE szPre = { 0, 0 }, szSt = { 0, 0 };
+			::GetTextExtentPoint32A(dis->hDC, pre, (int)strlen(pre), &szPre);
+			::GetTextExtentPoint32A(dis->hDC, st,  (int)strlen(st),  &szSt);
+
+			int total = szPre.cx + szSt.cx;
+			int x = dis->rcItem.left + ((dis->rcItem.right - dis->rcItem.left) - total) / 2;
+			int y = dis->rcItem.top  + ((dis->rcItem.bottom - dis->rcItem.top) - szPre.cy) / 2;
+
+			::SetTextColor(dis->hDC, this->m_clrText);
+			::TextOutA(dis->hDC, x, y, pre, (int)strlen(pre));
+			::SetTextColor(dis->hDC, on ? RGB(0, 170, 0) : this->m_clrText);
+			::TextOutA(dis->hDC, x + szPre.cx, y, st, (int)strlen(st));
+
+			if (old) ::SelectObject(dis->hDC, old);
+			rc = TRUE;
+			break;
+		}
 		if (dis && dis->CtlType == ODT_MENU) {
 			const char* txt =
 				dis->itemID == 7010 ? "Temp hex" :
@@ -1789,6 +1877,36 @@ FANCONTROL::DlgProc(HWND
 		if ((HWND)mp2 == ::GetDlgItem(this->hwndDialog, 8311)) {
 			int pos = (int)::SendMessage((HWND)mp2, TBM_GETPOS, 0, 0);
 			int val = (pos <= 7) ? pos : 64;   // position 8 -> 64 (max)
+
+			if (pos >= 8) {
+				// Warn the first time the slider reaches max. WM_HSCROLL fires
+				// repeatedly during a single drag (THUMBTRACK, THUMBPOSITION,
+				// ENDTRACK), so gate on m_maxWarned to prompt only once per
+				// visit to max -- otherwise Cancel has to be clicked for every
+				// repeat notification.
+				if (!this->m_maxWarned) {
+					this->m_maxWarned = true;
+					int answer = ::MessageBoxA(this->hwndDialog,
+						"Setting the fan to maximum (64) runs it at full, "
+						"unregulated speed.\r\n\r\n"
+						"This is loud and bypasses normal speed regulation; "
+						"the firmware keeps the fan at full power until you "
+						"change the level. Use it only briefly to cool down a "
+						"hot machine.\r\n\r\nSet fan to maximum?",
+						"Maximum fan speed",
+						MB_OKCANCEL | MB_ICONWARNING);
+					if (answer != IDOK) {
+						// Cancelled: revert the slider to level 7 and apply that.
+						::SendMessage((HWND)mp2, TBM_SETPOS, TRUE, 7);
+						pos = 7;
+						val = 7;
+					}
+				}
+			} else {
+				// Off max again -> re-arm the warning for the next visit.
+				this->m_maxWarned = false;
+			}
+
 			char vb[16];
 			_itoa_s(val, vb, 10);
 			::SetDlgItemText(this->hwndDialog, 8310, vb);
@@ -1859,12 +1977,6 @@ FANCONTROL::DlgProc(HWND
 			else if (t >= this->IconLevels[1]) txt = RGB(232, 120, 0);
 			else if (t >= this->IconLevels[0]) txt = RGB(220, 170, 0);
 			else                               txt = RGB(0, 170, 0);
-		}
-		else if (cid == 8115) {
-			// TPControlFAN indicator: green when fan control is active (Smart/Manual)
-			if (this->CurrentMode == 2 || this->CurrentMode == 3)
-				txt = RGB(0, 170, 0);
-			// else: default m_clrText (black/white per theme)
 		}
 
 		::SetTextColor(hdc, txt);
@@ -2477,7 +2589,6 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		::CheckDlgButton(hwnd, 9314, self->ShowGraph      ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9321, self->IconColorFan    ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9322, self->ShowBiasedTemps ? BST_CHECKED : BST_UNCHECKED);
-		::CheckDlgButton(hwnd, 9323, self->Lev64Norm       ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9324, self->NoExtSensor      ? BST_CHECKED : BST_UNCHECKED);
 		::SetDlgItemInt(hwnd, 9310, self->Cycle, FALSE);
 
@@ -2543,9 +2654,6 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9322,
 				"Apply the per-sensor offsets (from the ini) to the temperatures shown "
 				"here, not just to the control logic.");
-			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9323,
-				"Treat fan level 64 as a normal speed rather than 'maximum', so it is "
-				"not flagged as a max-speed condition.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9324,
 				"Ignore external / secondary temperature sensors when reading temps.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9325,
@@ -2639,7 +2747,6 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 	this->ShowGraph      = (::IsDlgButtonChecked(hwnd, 9314) == BST_CHECKED);
 	this->IconColorFan    = (::IsDlgButtonChecked(hwnd, 9321) == BST_CHECKED);
 	this->ShowBiasedTemps = (::IsDlgButtonChecked(hwnd, 9322) == BST_CHECKED);
-	this->Lev64Norm       = (::IsDlgButtonChecked(hwnd, 9323) == BST_CHECKED);
 	this->NoExtSensor     = (::IsDlgButtonChecked(hwnd, 9324) == BST_CHECKED);
 	{
 		BOOL ok = FALSE;

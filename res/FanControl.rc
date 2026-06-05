@@ -31,7 +31,7 @@ CAPTION "TPFanControl v2.33 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     LTEXT           "Fan Control",9210,99,7,120,9
-    CTEXT           "TPControlFAN",8115,103,15,145,13
+    CONTROL         "",8115,"Static",SS_OWNERDRAW,103,18,145,13
     LTEXT           "State",IDC_STATIC,103,36,21,8
     EDITTEXT        8100,126,34,121,13,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Switch",IDC_STATIC,103,52,21,8
@@ -45,23 +45,31 @@ BEGIN
     CONTROL         "Smart (TPFanControl.ini)",8301,"Button",BS_AUTORADIOBUTTON,129,94,96,10
     CONTROL         "Manual ",8302,"Button",BS_AUTORADIOBUTTON,129,108,38,10
     EDITTEXT        8310,171,105,32,14,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "0-7, 64=max",IDC_STATIC,207,107,46,8
+    LTEXT           "0-7, 64 = Max",IDC_STATIC,207,107,60,8
     CONTROL         "",8311,"msctls_trackbar32",TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP,103,126,148,11
+    CTEXT           "0",IDC_STATIC,102,137,12,8
+    CTEXT           "1",IDC_STATIC,119,137,12,8
+    CTEXT           "2",IDC_STATIC,137,137,12,8
+    CTEXT           "3",IDC_STATIC,154,137,12,8
+    CTEXT           "4",IDC_STATIC,171,137,12,8
+    CTEXT           "5",IDC_STATIC,188,137,12,8
+    CTEXT           "6",IDC_STATIC,206,137,12,8
+    CTEXT           "7",IDC_STATIC,223,137,12,8
+    CTEXT           "Max",IDC_STATIC,236,137,20,8
     LTEXT           "Temperatures",9198,9,7,80,9
-    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,70,148
+    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,78,74
     LTEXT           "Status",9199,99,145,120,9
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Last change",9196,103,169,50,8
     EDITTEXT        8113,103,179,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Log (see TPFanControl.log)",9201,262,7,200,9
     EDITTEXT        9200,269,18,287,156,ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_READONLY | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL
-    CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,20,181,20,10
-    CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,45,181,31,10
-    PUSHBUTTON      "Settings...",5100,455,198,65,14
-    CONTROL         "Temp hex",7010,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,201,47,10
-    CONTROL         "Show log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,57,201,47,10
-    CONTROL         "Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,107,201,50,10
-    CONTROL         "Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,160,201,100,10
+    CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,20,94,20,10
+    CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,45,94,31,10
+    CONTROL         "Show log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,201,44,10
+    CONTROL         "Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,52,201,48,10
+    CONTROL         "Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,201,98,10
+    PUSHBUTTON      "Settings",5100,201,198,46,14
     LTEXT           "Temperature history",9202,9,214,160,9
     CONTROL         "",8120,"Static",SS_OWNERDRAW,12,224,546,18
 END
@@ -97,7 +105,7 @@ CAPTION "TPFanControl v2.33 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     LTEXT           "Fan Control",9210,99,7,120,9
-    CTEXT           "TPControlFAN",8115,103,15,145,13
+    CONTROL         "",8115,"Static",SS_OWNERDRAW,103,18,145,13
     LTEXT           "State",IDC_STATIC,103,36,21,8
     EDITTEXT        8100,126,34,121,13,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Switch",IDC_STATIC,103,52,21,8
@@ -111,23 +119,31 @@ BEGIN
     CONTROL         "Smart (TPFanControl.ini)",8301,"Button",BS_AUTORADIOBUTTON,129,94,96,10
     CONTROL         "Manual ",8302,"Button",BS_AUTORADIOBUTTON,129,108,36,10
     EDITTEXT        8310,171,105,25,14,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "0-7, 64=max",IDC_STATIC,199,107,46,8
+    LTEXT           "0-7, 64 = Max",IDC_STATIC,199,107,60,8
     CONTROL         "",8311,"msctls_trackbar32",TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP,103,126,145,11
+    CTEXT           "0",IDC_STATIC,102,137,12,8
+    CTEXT           "1",IDC_STATIC,119,137,12,8
+    CTEXT           "2",IDC_STATIC,136,137,12,8
+    CTEXT           "3",IDC_STATIC,153,137,12,8
+    CTEXT           "4",IDC_STATIC,170,137,12,8
+    CTEXT           "5",IDC_STATIC,186,137,12,8
+    CTEXT           "6",IDC_STATIC,203,137,12,8
+    CTEXT           "7",IDC_STATIC,220,137,12,8
+    CTEXT           "Max",IDC_STATIC,234,137,20,8
     LTEXT           "Temperatures",9198,9,7,80,9
-    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,70,148
+    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,78,74
     LTEXT           "Status",9199,99,145,120,9
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Last change",9196,103,169,50,8
     EDITTEXT        8113,103,179,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Log (see TPFanControl.log)",9201,258,7,200,9
     EDITTEXT        9200,266,18,290,156,ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_READONLY | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL
-    CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,21,181,20,10
-    CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,46,181,31,10
-    PUSHBUTTON      "Settings...",5100,455,198,65,14
-    CONTROL         "Temp hex",7010,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,201,47,10
-    CONTROL         "Show log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,57,201,47,10
-    CONTROL         "Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,107,201,50,10
-    CONTROL         "Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,160,201,100,10
+    CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,21,94,20,10
+    CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,46,94,31,10
+    CONTROL         "Show log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,201,44,10
+    CONTROL         "Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,52,201,48,10
+    CONTROL         "Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,201,98,10
+    PUSHBUTTON      "Settings",5100,201,198,46,14
     LTEXT           "Temperature history",9202,9,214,160,9
     CONTROL         "",8120,"Static",SS_OWNERDRAW,12,224,546,18
 END
@@ -157,47 +173,46 @@ BEGIN
 END
 
 
-9300 DIALOGEX 0, 0, 230, 366
+9300 DIALOGEX 0, 0, 230, 322
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "TPFanControl Settings"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "Display",IDC_STATIC,7,5,216,79
+    LTEXT           "Display",IDC_STATIC,7,7,200,9
     CONTROL         "Temperature tray icon (text)",9303,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,18,200,10
     CONTROL         "Show EC address column (temp hex)",9304,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,31,200,10
     CONTROL         "Show log panel",9305,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,44,200,10
     CONTROL         "Dark mode",9306,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,57,200,10
     CONTROL         "Show temperature history graph",9314,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,70,200,10
-    GROUPBOX        "Window",IDC_STATIC,7,89,216,40
-    CONTROL         "Start minimized to tray",9301,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,102,200,10
-    CONTROL         "Always on top",9302,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,115,200,10
-    GROUPBOX        "Notifications && logging",IDC_STATIC,7,134,216,58
-    CONTROL         "Disable balloon notifications",9307,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,147,200,10
-    CONTROL         "Write TPFanControl.log",9308,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,160,95,10
-    CONTROL         "Write CSV log",9309,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,113,160,95,10
-    LTEXT           "Poll interval (seconds):",IDC_STATIC,14,175,80,8
-    EDITTEXT        9310,98,173,30,13,ES_AUTOHSCROLL | ES_NUMBER
-    GROUPBOX        "Icon color thresholds",IDC_STATIC,7,197,216,42
-    LTEXT           "Warm",9315,14,209,42,8
-    LTEXT           "Hot",9316,60,209,42,8
-    LTEXT           "Critical",9317,106,209,42,8
-    EDITTEXT        9311,14,221,40,13,ES_AUTOHSCROLL | ES_NUMBER
-    EDITTEXT        9312,60,221,40,13,ES_AUTOHSCROLL | ES_NUMBER
-    EDITTEXT        9313,106,221,40,13,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "",9319,151,223,65,9
-    GROUPBOX        "Behavior",IDC_STATIC,7,243,216,60
-    CONTROL         "Color tray icon by fan speed (else by temperature)",9321,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,256,205,10
-    CONTROL         "Apply sensor offsets to displayed temperatures",9322,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,269,205,10
-    CONTROL         "Treat fan level 64 as normal (not maximum)",9323,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,282,205,10
-    CONTROL         "Skip external / secondary temp sensors",9324,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,295,205,10
-    GROUPBOX        "Safety",IDC_STATIC,7,306,216,30
-    LTEXT           "Force fan 7 when max temp reaches (0 = off):",IDC_STATIC,14,319,170,8
-    EDITTEXT        9325,165,317,30,13,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "",9326,199,319,16,8
-    PUSHBUTTON      "Fan curve...",9330,7,345,52,14
-    DEFPUSHBUTTON   "OK",IDOK,65,345,48,14
-    PUSHBUTTON      "Apply",9320,118,345,48,14
-    PUSHBUTTON      "Cancel",IDCANCEL,171,345,48,14
+    LTEXT           "Window",IDC_STATIC,7,84,200,9
+    CONTROL         "Start minimized to tray",9301,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,95,200,10
+    CONTROL         "Always on top",9302,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,108,200,10
+    LTEXT           "Notifications && logging",IDC_STATIC,7,122,200,9
+    CONTROL         "Disable balloon notifications",9307,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,133,200,10
+    CONTROL         "Write TPFanControl.log",9308,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,146,95,10
+    CONTROL         "Write CSV log",9309,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,113,146,95,10
+    LTEXT           "Poll interval (seconds):",IDC_STATIC,14,161,80,8
+    EDITTEXT        9310,98,159,30,13,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "Icon color thresholds",IDC_STATIC,7,176,200,9
+    LTEXT           "Warm",9315,14,188,42,8
+    LTEXT           "Hot",9316,60,188,42,8
+    LTEXT           "Critical",9317,106,188,42,8
+    EDITTEXT        9311,14,199,40,13,ES_AUTOHSCROLL | ES_NUMBER
+    EDITTEXT        9312,60,199,40,13,ES_AUTOHSCROLL | ES_NUMBER
+    EDITTEXT        9313,106,199,40,13,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "",9319,151,201,65,9
+    LTEXT           "Behavior",IDC_STATIC,7,216,200,9
+    CONTROL         "Color tray icon by fan speed (else by temperature)",9321,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,227,205,10
+    CONTROL         "Apply sensor offsets to displayed temperatures",9322,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,240,205,10
+    CONTROL         "Skip external / secondary temp sensors",9324,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,253,205,10
+    LTEXT           "Safety",IDC_STATIC,7,267,200,9
+    LTEXT           "Force fan 7 when max temp reaches (0 = off):",IDC_STATIC,14,279,170,8
+    EDITTEXT        9325,165,277,30,13,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "",9326,199,279,16,8
+    PUSHBUTTON      "Fan curve...",9330,7,300,52,14
+    DEFPUSHBUTTON   "OK",IDOK,65,300,48,14
+    PUSHBUTTON      "Apply",9320,118,300,48,14
+    PUSHBUTTON      "Cancel",IDCANCEL,171,300,48,14
 END
 
 
