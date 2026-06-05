@@ -121,6 +121,7 @@ protected:
 		NoWaitMessage,
 		Runs_as_service;
 	int ReadErrorCount;
+	int m_ecErrorsTotal = 0;   // cumulative EC read errors (shown in tray tooltip)
 	int MaxReadErrors;
 	int SecWinUptime;
 	int SlimDialog;
@@ -224,6 +225,7 @@ protected:
 	char Title5[128];
 	char LastTitle[128];
 	char LastTooltip[128];
+	char TrayTip[128];   // multi-line tray tooltip: mode / max temp / fan / profile
 	char CurrentStatus[256];
 	char CurrentStatuscsv[256];
 

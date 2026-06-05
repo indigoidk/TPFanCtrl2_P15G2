@@ -176,6 +176,48 @@ FANCONTROL::HandleData(void) {
 	sprintf_s(this->Title2 + strlen(this->Title2), sizeof(this->Title2) - strlen(this->Title2),
 		" %d/%d rpm", this->fan1speed, this->fan2speed);
 
+	// compose the richer multi-line tray tooltip (mode / max temp / fan / active
+	// profile, plus game + EC-error flags). Title2 stays the single-line title.
+	{
+		int dT = Fahrenheit ? (this->MaxTemp * 9 / 5 + 32) : this->MaxTemp;
+		const char* unit = Fahrenheit ? "F" : "C";
+
+		char modeStr[40];
+		switch (this->CurrentModeFromDialog()) {
+		case 1:  strcpy_s(modeStr, sizeof(modeStr), "BIOS mode"); break;
+		case 3:  strcpy_s(modeStr, sizeof(modeStr), "Manual mode"); break;
+		case 2:
+			if (this->SmartLevels2[0].temp2 != 0)
+				sprintf_s(modeStr, sizeof(modeStr), "Smart mode (Profile %d)", this->IndSmartLevel + 1);
+			else
+				strcpy_s(modeStr, sizeof(modeStr), "Smart mode");
+			break;
+		default: strcpy_s(modeStr, sizeof(modeStr), "Read-only (no EC control)"); break;
+		}
+
+		char fanStr[16];
+		if (fanctrl & 0x80)              strcpy_s(fanStr, sizeof(fanStr), "BIOS");
+		else if ((fanctrl & 0x7f) == 64) strcpy_s(fanStr, sizeof(fanStr), "max");
+		else                             sprintf_s(fanStr, sizeof(fanStr), "%d", fanctrl & 0x7f);
+
+		sprintf_s(this->TrayTip, sizeof(this->TrayTip),
+			"%s\r\nMax %d\xb0%s   Fan %s   %d/%d rpm",
+			modeStr, dT, unit, fanStr, this->fan1speed, this->fan2speed);
+
+		char extra[48] = "";
+		if (this->m_driversHidden)
+			strcpy_s(extra, sizeof(extra), "Game mode");
+		if (this->m_ecErrorsTotal > 0) {
+			if (extra[0]) strcat_s(extra, sizeof(extra), "   ");
+			sprintf_s(extra + strlen(extra), sizeof(extra) - strlen(extra),
+				"EC errors: %d", this->m_ecErrorsTotal);
+		}
+		if (extra[0]) {
+			strcat_s(this->TrayTip, sizeof(this->TrayTip), "\r\n");
+			strcat_s(this->TrayTip, sizeof(this->TrayTip), extra);
+		}
+	}
+
 	sprintf_s(obuf2, sizeof(obuf2), "%d RPM", this->fan1speed);
 	::SetDlgItemText(this->hwndDialog, 8102, obuf2);
 

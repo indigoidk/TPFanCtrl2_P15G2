@@ -163,6 +163,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	setzero(this->Title3, sizeof(this->Title3));
 	setzero(this->Title5, sizeof(this->Title5));
 	setzero(this->LastTitle, sizeof(this->LastTitle));
+	setzero(this->TrayTip, sizeof(this->TrayTip));
 	setzero(this->CurrentStatus, sizeof(this->CurrentStatus));
 	setzero(this->CurrentStatuscsv, sizeof(this->CurrentStatuscsv));
 	setzero(this->IgnoreSensors, sizeof(this->IgnoreSensors));
@@ -1174,13 +1175,15 @@ FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
 	const int dpi    = ::GetDeviceCaps(hdc, LOGPIXELSX);
 	const int traceW = __max(1, ::MulDiv(2, dpi, 96));
 
-	// data range over the window, with a sane minimum span for readability
-	int lo = 255, hi = 0;
+	// data range over the window, with a sane minimum span for readability.
+	// also remember the peak sample (value + position) for the max marker.
+	int lo = 255, hi = 0, maxVal = 0, maxIdx = 0;
 	long sum = 0;
 	for (int i = 0; i < n; i++) {
 		int v = this->m_tempHist[(head - n + i + TEMPHIST_MAX) % TEMPHIST_MAX];
 		if (v < lo) lo = v;
 		if (v > hi) hi = v;
+		if (v >= maxVal) { maxVal = v; maxIdx = i; }   // last/right-most peak
 		sum += v;
 	}
 	int avg = (int)(sum / n);
@@ -1225,6 +1228,38 @@ FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
 	}
 	::SelectObject(mdc, oldPen);
 	::DeleteObject(linePen);
+
+	// markers: filled dot at the current sample, hollow ring at the window peak
+	{
+		const int r = __max(2, ::MulDiv(2, dpi, 96));
+		auto plotX  = [&](int i){ return (n == 1) ? 0 : (w - 1) * i / (n - 1); };
+		auto plotY  = [&](int v){ return bot - ploth * (v - lo) / (hi - lo); };
+		auto clampx = [&](int x){ return x < r ? r : (x > w - 1 - r ? w - 1 - r : x); };
+
+		// current sample (right edge): filled dot in the trace color
+		int cx = clampx(plotX(n - 1)), cy = plotY(latest);
+		HBRUSH fb = ::CreateSolidBrush(lineClr);
+		HBRUSH ob = (HBRUSH)::SelectObject(mdc, fb);
+		HPEN   fp = ::CreatePen(PS_SOLID, 1, lineClr);
+		HPEN   op = (HPEN)::SelectObject(mdc, fp);
+		::Ellipse(mdc, cx - r, cy - r, cx + r, cy + r);
+
+		// window peak: hollow ring (only when it isn't the current sample)
+		if (maxIdx != n - 1) {
+			::SelectObject(mdc, ::GetStockObject(NULL_BRUSH));
+			HPEN mp = ::CreatePen(PS_SOLID, 1, this->m_clrText);
+			HPEN op2 = (HPEN)::SelectObject(mdc, mp);
+			int mx = clampx(plotX(maxIdx)), my = plotY(maxVal);
+			::Ellipse(mdc, mx - r, my - r, mx + r, my + r);
+			::SelectObject(mdc, op2);
+			::DeleteObject(mp);
+		}
+
+		::SelectObject(mdc, op);
+		::DeleteObject(fp);
+		::SelectObject(mdc, ob);
+		::DeleteObject(fb);
+	}
 
 	// labels: current value (left), range (right), window average (center). Drop
 	// the less-essential ones rather than let them overlap on a narrow window.
@@ -1727,12 +1762,10 @@ FANCONTROL::DlgProc(HWND
 
 			if (this->pTaskbarIcon)
 			{
-				char tip[128];
-				strcpy_s(tip, sizeof(tip), this->Title2);
-				if (this->m_driversHidden)
-					strcat_s(tip, sizeof(tip), " [GAME]");
-				this->pTaskbarIcon->SetTooltip(tip);
-				strcpy_s(this->LastTooltip, sizeof(this->LastTooltip), tip);
+				// multi-line tooltip (mode / max temp / fan / profile / flags),
+				// composed in HandleData; falls back to empty before the first read
+				this->pTaskbarIcon->SetTooltip(this->TrayTip);
+				strcpy_s(this->LastTooltip, sizeof(this->LastTooltip), this->TrayTip);
 				int icon = -1;
 
 				if (this->CurrentModeFromDialog() == 1)
@@ -2110,6 +2143,7 @@ FANCONTROL::DlgProc(HWND
 			sprintf_s(buf, sizeof(buf), "We will close to BIOS-Mode after %d consecutive read errors", this->MaxReadErrors);
 			this->Trace(buf);
 			this->ReadErrorCount++;
+			this->m_ecErrorsTotal++;   // cumulative (ReadErrorCount resets on success)
 
 			// after so many consecutive read errors, try to switch back to bios mode
 			if (this->ReadErrorCount > this->MaxReadErrors) {
@@ -2797,7 +2831,7 @@ void FANCONTROL::ShowCurveDialog(HWND owner)
 }
 
 void FANCONTROL::ProcessTextIcons(void) {
-	TCHAR myszTip[64];
+	TCHAR myszTip[128];
 	int& icon    = this->m_textIcon;       // current text-icon color id (persists across calls)
 	int& oldicon = this->m_textIconPrev;   // previous id, for IconColorFan "keep last"
 
@@ -2855,7 +2889,7 @@ void FANCONTROL::ProcessTextIcons(void) {
 
 	this->iFarbeIconB = icon;
 
-	lstrcpyn(myszTip, this->Title2, _countof(myszTip));   // count is in TCHARs, not bytes
+	lstrcpyn(myszTip, this->TrayTip, _countof(myszTip));   // count is in TCHARs, not bytes
 
 	if (pTextIconMutex->Lock(100)) {
 		//INIT ppTbTextIcon
