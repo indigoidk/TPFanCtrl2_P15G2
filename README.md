@@ -3,6 +3,8 @@
 [![build](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml/badge.svg)](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml)
 [![latest release](https://img.shields.io/github/v/release/indigoidk/TPFanCtrl2_P15G2?label=download)](https://github.com/indigoidk/TPFanCtrl2_P15G2/releases/latest)
 
+![TPFanControl main window](docs/screenshot.png)
+
 A Windows fan-control utility for Lenovo ThinkPads. It reads the embedded
 controller (EC) for temperatures and fan speeds and lets you run the fan in
 **BIOS (automatic)**, **Smart (temperature-curve)**, or **Manual** mode.
@@ -17,7 +19,9 @@ Grab the `TPFanControl-P15G2-*.zip`, unzip it anywhere, and run
 
 > - Windows SmartScreen may warn about the unsigned exe → **More info → Run anyway**.
 > - You also need the **TVicPort** driver installed on the machine (see
->   [Requirements](#requirements)); it is not redistributed here for license reasons.
+>   [Requirements](#requirements)); it is not redistributed here for license
+>   reasons —
+>   [download it free from EnTech Taiwan](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6).
 
 This is a fork of the classic *TPFanControl / TPFanCtrl2* tailored for the
 **ThinkPad P15 Gen2 (dual fan)**, with a number of additional features (see
@@ -50,9 +54,11 @@ below). Code version string: `2.33 P15G2 Dual`.
 
 - Windows 10/11 (x86 / Win32 build).
 - **Administrator privileges** — required to talk to the embedded controller.
-- The **TVicPort** kernel driver (port-I/O access). `TVicPort.lib` is included
-  in this repo so the project builds from a clean clone; the driver itself must
-  be installed on the target machine.
+- The **TVicPort** kernel driver (port-I/O access) —
+  **[download: TVicPort (fully-functional freeware)](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6)**
+  from EnTech Taiwan, then run its installer. `TVicPort.lib` is included in this
+  repo so the project builds from a clean clone; the driver itself must be
+  installed on the target machine.
 - A supported **Lenovo ThinkPad** (EC layout matches; defaults tuned for P15 Gen2).
 
 ## Building
@@ -249,3 +255,5 @@ Schädler / Troubadix and the TPFanCtrl2 lineage.
 
 **Third-party:** `TVicPort` (EnTech Taiwan) is *not* covered by this project's
 license — it has its own terms. Ensure you are licensed to use/redistribute it.
+Download:
+[TVicPort (fully-functional freeware)](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6).
