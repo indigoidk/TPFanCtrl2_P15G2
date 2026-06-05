@@ -3,7 +3,7 @@
 [![build](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml/badge.svg)](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml)
 [![latest release](https://img.shields.io/github/v/release/indigoidk/TPFanCtrl2_P15G2?label=download)](https://github.com/indigoidk/TPFanCtrl2_P15G2/releases/latest)
 
-![TPFanControl main window](docs/screenshot.png)
+![TPFanControl main window](https://raw.githubusercontent.com/indigoidk/TPFanCtrl2_P15G2/master/docs/screenshot.png)
 
 A Windows fan-control utility for Lenovo ThinkPads. It reads the embedded
 controller (EC) for temperatures and fan speeds and lets you run the fan in
