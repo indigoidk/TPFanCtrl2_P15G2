@@ -148,6 +148,8 @@ public:
 
 	void UncheckMenuItem(int id);
 
+	void SetDefaultItem(int id);   // bold the item double-click triggers
+
 	BOOL IsFlags(int id, int flags);
 
 	BOOL IsMenuItemEnabled(int id);

@@ -415,7 +415,8 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	::EnableWindow(::GetDlgItem(this->hwndDialog, 8300), this->ActiveMode);
 	::EnableWindow(::GetDlgItem(this->hwndDialog, 8301), this->ActiveMode);
 	::EnableWindow(::GetDlgItem(this->hwndDialog, 8302), this->ActiveMode);
-	::EnableWindow(::GetDlgItem(this->hwndDialog, 8310), this->ActiveMode);
+	// manual level box + slider: only active in Manual mode
+	this->UpdateManualControlsEnabled();
 
 	// make it call HandleControl initially
 	::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
@@ -464,6 +465,43 @@ FANCONTROL::AddTip(int ctrlId, const char* text) {
 }
 
 //-------------------------------------------------------------------------
+//  copy the current readings (as shown in the dialog) to the clipboard
+//-------------------------------------------------------------------------
+void
+FANCONTROL::CopyReadingsToClipboard() {
+	char st[256] = "", sw[64] = "", f1[64] = "", f2[64] = "", temps[1024] = "";
+	::GetDlgItemTextA(this->hwndDialog, 8100, st,    sizeof(st));     // State
+	::GetDlgItemTextA(this->hwndDialog, 8103, sw,    sizeof(sw));     // Switch
+	::GetDlgItemTextA(this->hwndDialog, 8102, f1,    sizeof(f1));     // Fan 1
+	::GetDlgItemTextA(this->hwndDialog, 8104, f2,    sizeof(f2));     // Fan 2
+	::GetDlgItemTextA(this->hwndDialog, 8101, temps, sizeof(temps));  // per-sensor temps
+
+	char buf[2048];
+	_snprintf_s(buf, sizeof(buf), _TRUNCATE,
+		"TPFanControl\r\n"
+		"State:\t%s\r\nSwitch:\t%s\r\nFan 1:\t%s\r\nFan 2:\t%s\r\n"
+		"Temperatures:\r\n%s\r\n",
+		st, sw, f1, f2, temps);
+
+	if (!::OpenClipboard(this->hwndDialog))
+		return;
+	::EmptyClipboard();
+	size_t len = strlen(buf) + 1;
+	HGLOBAL hMem = ::GlobalAlloc(GMEM_MOVEABLE, len);
+	if (hMem) {
+		void* p = ::GlobalLock(hMem);
+		if (p) {
+			memcpy(p, buf, len);
+			::GlobalUnlock(hMem);
+			::SetClipboardData(CF_TEXT, hMem);   // clipboard owns hMem now
+		}
+		else
+			::GlobalFree(hMem);
+	}
+	::CloseClipboard();
+}
+
+//-------------------------------------------------------------------------
 //  destructor
 //-------------------------------------------------------------------------
 FANCONTROL::~FANCONTROL() {
@@ -502,6 +540,54 @@ FANCONTROL::~FANCONTROL() {
 
 	if (pTextIconMutex)
 		delete pTextIconMutex;
+}
+
+//-------------------------------------------------------------------------
+//  open a companion file (log / ini) in the user's default editor; the paths
+//  are relative, matching how the app reads/writes them in its working dir
+//-------------------------------------------------------------------------
+static void OpenCompanionFile(HWND owner, const char* file) {
+	if (::GetFileAttributesA(file) == INVALID_FILE_ATTRIBUTES) {
+		::MessageBoxA(owner,
+			"That file does not exist yet.\n\n(The log is only written when "
+			"\"Write TPFanControl.log\" is enabled.)",
+			file, MB_ICONINFORMATION);
+		return;
+	}
+	HINSTANCE h = ::ShellExecuteA(owner, "open", file, NULL, NULL, SW_SHOWNORMAL);
+	if ((INT_PTR)h <= 32)   // no association (e.g. .log): fall back to Notepad
+		::ShellExecuteA(owner, "open", "notepad.exe", file, NULL, SW_SHOWNORMAL);
+}
+
+//-------------------------------------------------------------------------
+//  attach a balloon tooltip to one control on a modal dialog. The tip window
+//  is created on first use (pass NULL) and returned for reuse on later calls;
+//  it is owned by the dialog, so it is freed automatically when the dialog
+//  closes. Mirrors FANCONTROL::AddTip, which targets the main window.
+//-------------------------------------------------------------------------
+static HWND AddDialogTip(HWND hwndDlg, HWND hTip, HINSTANCE hinst,
+	int ctrlId, const char* text) {
+	HWND hCtl = ::GetDlgItem(hwndDlg, ctrlId);
+	if (!hCtl)
+		return hTip;
+	if (!hTip) {
+		hTip = ::CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
+			WS_POPUP | TTS_ALWAYSTIP | TTS_BALLOON,
+			CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+			hwndDlg, NULL, hinst, NULL);
+		if (!hTip)
+			return NULL;
+		::SendMessage(hTip, TTM_SETMAXTIPWIDTH, 0, 320);
+		::SendMessage(hTip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 30000);
+	}
+	TOOLINFO ti = {};
+	ti.cbSize   = sizeof(TOOLINFO);
+	ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+	ti.hwnd     = hwndDlg;
+	ti.uId      = (UINT_PTR)hCtl;
+	ti.lpszText = (LPSTR)text;
+	::SendMessage(hTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+	return hTip;
 }
 
 //-------------------------------------------------------------------------
@@ -1056,21 +1142,37 @@ void
 FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
 	// background: match the editable-field color, fall back to the dialog color
 	HBRUSH bg = this->m_hbrField ? this->m_hbrField : this->m_hbrDlg;
-	if (bg) ::FillRect(hdc, &rc, bg);
 
 	const int w = rc.right - rc.left;
 	const int h = rc.bottom - rc.top;
 	const int n = this->m_tempHistCount;
 	const int head = this->m_tempHistHead;
 
-	::SetBkMode(hdc, TRANSPARENT);
-
 	if (n <= 0 || w < 4 || h < 4) {
+		if (bg) ::FillRect(hdc, &rc, bg);
+		::SetBkMode(hdc, TRANSPARENT);
 		::SetTextColor(hdc, this->m_clrText);
 		RECT tr = rc; tr.left += 4;
 		::DrawTextA(hdc, "collecting...", -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
 		return;
 	}
+
+	// double-buffer: build the frame in a memory DC and blit it once, so the
+	// owner-draw static never shows a half-painted graph (no flicker on resize).
+	// carry over the control's font so the labels keep the dialog typeface.
+	HFONT  hFont = (HFONT)::GetCurrentObject(hdc, OBJ_FONT);
+	HDC    mdc   = ::CreateCompatibleDC(hdc);
+	HBITMAP mbm  = ::CreateCompatibleBitmap(hdc, w, h);
+	HGDIOBJ obm  = ::SelectObject(mdc, mbm);
+	HGDIOBJ ofn  = ::SelectObject(mdc, hFont);
+
+	RECT lrc = { 0, 0, w, h };
+	if (bg) ::FillRect(mdc, &lrc, bg);
+	::SetBkMode(mdc, TRANSPARENT);
+
+	// trace line scaled with the display DPI (crisp/proportional on high-DPI)
+	const int dpi    = ::GetDeviceCaps(hdc, LOGPIXELSX);
+	const int traceW = __max(1, ::MulDiv(2, dpi, 96));
 
 	// data range over the window, with a sane minimum span for readability
 	int lo = 255, hi = 0;
@@ -1094,63 +1196,75 @@ FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
 	else if (latest >= this->IconLevels[0]) lineClr = RGB(220, 170, 0);
 	else                                    lineClr = RGB(0, 170, 0);
 
-	const int top = rc.top + 1, bot = rc.bottom - 2;   // 1px padding top/bottom
+	const int top = 1, bot = h - 2;   // 1px padding top/bottom (local coords)
 	const int ploth = bot - top;
 
 	// faint gridlines at each IconLevel threshold that falls inside the range
 	COLORREF gridClr = this->DarkMode ? RGB(70, 70, 74) : RGB(210, 210, 210);
 	HPEN gridPen = ::CreatePen(PS_SOLID, 1, gridClr);
-	HPEN oldPen = (HPEN)::SelectObject(hdc, gridPen);
+	HPEN oldPen = (HPEN)::SelectObject(mdc, gridPen);
 	for (int g = 0; g < 3; g++) {
 		int lvl = this->IconLevels[g];
 		if (lvl <= lo || lvl >= hi) continue;
 		int y = bot - ploth * (lvl - lo) / (hi - lo);
-		::MoveToEx(hdc, rc.left, y, NULL);
-		::LineTo(hdc, rc.right, y);
+		::MoveToEx(mdc, 0, y, NULL);
+		::LineTo(mdc, w, y);
 	}
-	::SelectObject(hdc, oldPen);
+	::SelectObject(mdc, oldPen);
 	::DeleteObject(gridPen);
 
 	// the temperature trace
-	HPEN linePen = ::CreatePen(PS_SOLID, 1, lineClr);
-	oldPen = (HPEN)::SelectObject(hdc, linePen);
+	HPEN linePen = ::CreatePen(PS_SOLID, traceW, lineClr);
+	oldPen = (HPEN)::SelectObject(mdc, linePen);
 	for (int i = 0; i < n; i++) {
 		int v = this->m_tempHist[(head - n + i + TEMPHIST_MAX) % TEMPHIST_MAX];
-		int x = rc.left + (n == 1 ? 0 : (w - 1) * i / (n - 1));
+		int x = (n == 1 ? 0 : (w - 1) * i / (n - 1));
 		int y = bot - ploth * (v - lo) / (hi - lo);
-		if (i == 0) ::MoveToEx(hdc, x, y, NULL);
-		else        ::LineTo(hdc, x, y);
+		if (i == 0) ::MoveToEx(mdc, x, y, NULL);
+		else        ::LineTo(mdc, x, y);
 	}
-	::SelectObject(hdc, oldPen);
+	::SelectObject(mdc, oldPen);
 	::DeleteObject(linePen);
 
-	// current value + range labels
-	char lbl[48];
-	if (this->Fahrenheit)
-		sprintf_s(lbl, sizeof(lbl), "%d\xb0 F", latest * 9 / 5 + 32);
-	else
-		sprintf_s(lbl, sizeof(lbl), "%d\xb0 C", latest);
-	::SetTextColor(hdc, lineClr);
-	RECT lr = rc; lr.left += 4;
-	::DrawTextA(hdc, lbl, -1, &lr, DT_SINGLELINE | DT_TOP | DT_LEFT);
-
-	char rng[48];
-	if (this->Fahrenheit)
-		sprintf_s(rng, sizeof(rng), "%d-%d\xb0 F", lo * 9 / 5 + 32, hi * 9 / 5 + 32);
-	else
-		sprintf_s(rng, sizeof(rng), "%d-%d\xb0 C", lo, hi);
-	::SetTextColor(hdc, this->m_clrText);
-	RECT rr = rc; rr.right -= 4;
-	::DrawTextA(hdc, rng, -1, &rr, DT_SINGLELINE | DT_TOP | DT_RIGHT);
-
-	// window average, centered at the top (min/max are the range label above)
-	char avgl[48];
-	if (this->Fahrenheit)
+	// labels: current value (left), range (right), window average (center). Drop
+	// the less-essential ones rather than let them overlap on a narrow window.
+	char lbl[48], rng[48], avgl[48];
+	if (this->Fahrenheit) {
+		sprintf_s(lbl,  sizeof(lbl),  "%d\xb0 F", latest * 9 / 5 + 32);
+		sprintf_s(rng,  sizeof(rng),  "%d-%d\xb0 F", lo * 9 / 5 + 32, hi * 9 / 5 + 32);
 		sprintf_s(avgl, sizeof(avgl), "avg %d\xb0", avg * 9 / 5 + 32);
-	else
+	} else {
+		sprintf_s(lbl,  sizeof(lbl),  "%d\xb0 C", latest);
+		sprintf_s(rng,  sizeof(rng),  "%d-%d\xb0 C", lo, hi);
 		sprintf_s(avgl, sizeof(avgl), "avg %d\xb0", avg);
-	RECT ar = rc;
-	::DrawTextA(hdc, avgl, -1, &ar, DT_SINGLELINE | DT_TOP | DT_CENTER);
+	}
+	SIZE szL = {}, szR = {}, szA = {};
+	::GetTextExtentPoint32A(mdc, lbl,  (int)strlen(lbl),  &szL);
+	::GetTextExtentPoint32A(mdc, rng,  (int)strlen(rng),  &szR);
+	::GetTextExtentPoint32A(mdc, avgl, (int)strlen(avgl), &szA);
+
+	::SetTextColor(mdc, lineClr);
+	RECT lr = { 4, 0, w, h };
+	::DrawTextA(mdc, lbl, -1, &lr, DT_SINGLELINE | DT_TOP | DT_LEFT);
+
+	bool roomForRange = (szL.cx + szR.cx + 8 < w);
+	if (roomForRange) {
+		::SetTextColor(mdc, this->m_clrText);
+		RECT rr = { 0, 0, w - 4, h };
+		::DrawTextA(mdc, rng, -1, &rr, DT_SINGLELINE | DT_TOP | DT_RIGHT);
+	}
+	if (roomForRange && szL.cx + szA.cx + szR.cx + 16 < w) {
+		::SetTextColor(mdc, this->m_clrText);
+		RECT ar = { 0, 0, w, h };
+		::DrawTextA(mdc, avgl, -1, &ar, DT_SINGLELINE | DT_TOP | DT_CENTER);
+	}
+
+	::BitBlt(hdc, rc.left, rc.top, w, h, mdc, 0, 0, SRCCOPY);
+
+	::SelectObject(mdc, ofn);
+	::SelectObject(mdc, obm);
+	::DeleteObject(mbm);
+	::DeleteDC(mdc);
 }
 
 //-------------------------------------------------------------------------
@@ -1194,6 +1308,29 @@ FANCONTROL::ModeToDialog(int mode) {
 	::SendDlgItemMessage(this->hwndDialog, 8300, BM_SETCHECK, mode == 1, 0L);
 	::SendDlgItemMessage(this->hwndDialog, 8301, BM_SETCHECK, mode == 2, 0L);
 	::SendDlgItemMessage(this->hwndDialog, 8302, BM_SETCHECK, mode == 3, 0L);
+	this->UpdateManualControlsEnabled();
+}
+
+//-------------------------------------------------------------------------
+//  the manual fan-level box (8310) and slider (8311) only do anything in
+//  Manual mode; grey them out otherwise (and whenever EC control is off)
+//-------------------------------------------------------------------------
+void
+FANCONTROL::UpdateManualControlsEnabled() {
+	BOOL manual = this->ActiveMode && (this->CurrentModeFromDialog() == 3);
+
+	// the level box greys visibly when disabled, so a plain disable reads fine
+	::EnableWindow(::GetDlgItem(this->hwndDialog, 8310), manual);
+
+	// a themed trackbar barely changes when merely disabled (the thumb greys
+	// only faintly), so hide it outright in BIOS/Smart mode for a clear cue.
+	// ShowWindow/EnableWindow with the unchanged state are cheap no-ops, so this
+	// is safe to call every poll. (Slim dialogs have no slider -> GetDlgItem NULL.)
+	HWND hSld = ::GetDlgItem(this->hwndDialog, 8311);
+	if (hSld) {
+		::EnableWindow(hSld, manual);
+		::ShowWindow(hSld, manual ? SW_SHOW : SW_HIDE);
+	}
 }
 
 void
@@ -1479,16 +1616,19 @@ FANCONTROL::DlgProc(HWND
 
 	case WM_CONTEXTMENU:
 	{
-		// right-click on the history sparkline -> offer to clear it
+		// right-click on the history sparkline -> offer to clear it; anywhere
+		// else on the dialog -> offer to copy the current readings
 		HWND hSpark = ::GetDlgItem(this->hwndDialog, 8120);
 		POINT pt = { (short)LOWORD(mp2), (short)HIWORD(mp2) };
 		RECT wr;
+		bool onSpark = false;
 		if (hSpark && ::GetWindowRect(hSpark, &wr)) {
 			if (pt.x == -1 && pt.y == -1) {   // invoked via keyboard
 				pt.x = (wr.left + wr.right) / 2;
 				pt.y = (wr.top + wr.bottom) / 2;
 			}
 			if (::PtInRect(&wr, pt)) {
+				onSpark = true;
 				HMENU hm = ::CreatePopupMenu();
 				::AppendMenuA(hm, MF_STRING, 1, "Clear history");
 				int sel = ::TrackPopupMenu(hm, TPM_RETURNCMD | TPM_RIGHTBUTTON,
@@ -1501,6 +1641,18 @@ FANCONTROL::DlgProc(HWND
 				}
 				rc = TRUE;
 			}
+		}
+		if (!onSpark) {
+			if (pt.x == -1 && pt.y == -1)   // invoked via keyboard
+				::GetCursorPos(&pt);
+			HMENU hm = ::CreatePopupMenu();
+			::AppendMenuA(hm, MF_STRING, 1, "Copy readings");
+			int sel = ::TrackPopupMenu(hm, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+				pt.x, pt.y, 0, this->hwndDialog, NULL);
+			::DestroyMenu(hm);
+			if (sel == 1)
+				this->CopyReadingsToClipboard();
+			rc = TRUE;
 		}
 		break;
 	}
@@ -1658,6 +1810,8 @@ FANCONTROL::DlgProc(HWND
 			//end temp display
 
 			if (cmd >= 8300 && cmd <= 8302 || cmd == 8310) {  // radio button or manual speed entry
+				if (cmd >= 8300 && cmd <= 8302)
+					this->UpdateManualControlsEnabled();   // reflect the new mode at once
 				::PostMessage(hwnd, WM__GETDATA, 0, 0);
 			}
 			else
@@ -1754,6 +1908,14 @@ FANCONTROL::DlgProc(HWND
 
 				case 5110: // smart fan-curve editor
 					this->ShowCurveDialog();
+					break;
+
+				case 5120: // open the log file in the default editor
+					OpenCompanionFile(this->hwndDialog, "TPFanControl.log");
+					break;
+
+				case 5130: // open the ini config in the default editor
+					OpenCompanionFile(this->hwndDialog, "TPFanControl.ini");
 					break;
 
 				case 5020: // end program
@@ -2066,6 +2228,9 @@ FANCONTROL::DlgProc(HWND
 			if (this->ShowTempIcon == 1)
 				m.DeleteMenuItem(5080);
 
+			// bold the item a double-click would trigger (the surviving Show/Hide)
+			m.SetDefaultItem(IsWindowVisible(this->hwndDialog) ? 5030 : 5010);
+
 			this->FreeECAccess();
 
 			m.Popup(this->hwndDialog);
@@ -2135,13 +2300,61 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			::SetDlgItemInt(hwnd, 9311, t0, FALSE);
 			::SetDlgItemInt(hwnd, 9312, t1, FALSE);
 			::SetDlgItemInt(hwnd, 9313, t2, FALSE);
-			::SetDlgItemTextA(hwnd, 9319, self->Fahrenheit
-				? "warm / hot / critical (\xb0" "F)" : "warm / hot / critical (\xb0" "C)");
+			::SetDlgItemTextA(hwnd, 9319, self->Fahrenheit ? "(\xb0" "F)" : "(\xb0" "C)");
 		}
 
 		// match the main window's full dark theme (titlebar + child controls so
 		// checkbox/label text is white in dark mode, not theme-drawn black)
 		ApplyDarkToDialog(hwnd, self->DarkMode);
+
+		// field tooltips (created lazily, owned by the dialog)
+		{
+			HWND tip = NULL;
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9303,
+				"Show a small temperature number as the tray icon instead of the "
+				"classic colored symbol.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9304,
+				"Add a column to the temperature list showing each sensor's raw EC "
+				"address (hex). For diagnostics.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9305,
+				"Show the scrolling Log panel on the right side of the main window.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9306,
+				"Dark color scheme for the main window and these dialogs.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9314,
+				"Show the temperature history sparkline along the bottom of the main "
+				"window.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9301,
+				"Start hidden in the tray instead of opening the window.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9302,
+				"Keep the main window above other windows.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9307,
+				"Suppress the tray balloon pop-ups (mode changes, warnings).");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9308,
+				"Append readings to TPFanControl.log in the program folder.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9309,
+				"Append readings to TPFanControl_csv.txt for spreadsheets.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9310,
+				"How often (seconds) to re-read temperatures and re-decide the fan. "
+				"1-600.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9311,
+				"Temperature at which the tray icon turns warm (yellow).");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9312,
+				"Temperature at which the tray icon turns hot (orange).");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9313,
+				"Temperature at which the tray icon turns critical (red).");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9321,
+				"Color the tray icon by current fan speed instead of by temperature.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9322,
+				"Apply the per-sensor offsets (from the ini) to the temperatures shown "
+				"here, not just to the control logic.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9323,
+				"Treat fan level 64 as a normal speed rather than 'maximum', so it is "
+				"not flagged as a max-speed condition.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9324,
+				"Ignore external / secondary temperature sensors when reading temps.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9330,
+				"Open the Smart fan-curve editor (temperature -> fan level table).");
+		}
 		return TRUE;
 
 	case WM_CTLCOLORDLG:
@@ -2151,7 +2364,15 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	case WM_CTLCOLORSTATIC:
 	case WM_CTLCOLORBTN:
 		if (self) {
-			::SetTextColor((HDC)wp, self->m_clrText);
+			// color the three threshold labels with their severity color so the
+			// warm/hot/critical mapping reads at a glance (same hues as the icon)
+			COLORREF tc = self->m_clrText;
+			switch (::GetDlgCtrlID((HWND)lp)) {
+			case 9315: tc = RGB(220, 170, 0); break;   // warm
+			case 9316: tc = RGB(232, 120, 0); break;   // hot
+			case 9317: tc = RGB(232, 48, 48); break;   // critical
+			}
+			::SetTextColor((HDC)wp, tc);
 			::SetBkMode((HDC)wp, TRANSPARENT);
 			return (INT_PTR)self->m_hbrDlg;
 		}
@@ -2391,6 +2612,30 @@ FANCONTROL::CurveDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 		self->CurveBufToGrid(hwnd, 0);
 
 		ApplyDarkToDialog(hwnd, self->DarkMode);
+
+		// field tooltips: profile radios + a per-column tip on every grid cell
+		{
+			HWND tip = NULL;
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9401,
+				"Profile 1: the active Smart curve. At least one row is required.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9402,
+				"Profile 2: an optional second curve you can switch to from the tray "
+				"menu. Leave every row blank to disable it.");
+			const char* colTip[4] = {
+				"Temp: the temperature threshold for this step (in the displayed "
+				"unit). Leave blank for an unused row.",
+				"Fan: the level to hold at/above this temperature. 0 = off, 1-7 = "
+				"increasing speed, 64 = max, 128 = hand back to BIOS.",
+				"Hyst+: extra degrees above the threshold required before stepping "
+				"UP to this row (reduces fan hunting).",
+				"Hyst-: degrees below the threshold required before stepping DOWN "
+				"from this row (reduces fan hunting)."
+			};
+			for (int r = 0; r < FANCONTROL::CURVE_ROWS; r++)
+				for (int c = 0; c < 4; c++)
+					tip = AddDialogTip(hwnd, tip, self->hinstapp,
+						9410 + r * 4 + c, colTip[c]);
+		}
 		return TRUE;
 
 	case WM_CTLCOLORDLG:

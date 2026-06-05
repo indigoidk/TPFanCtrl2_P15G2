@@ -380,6 +380,11 @@ MENU::UncheckMenuItem(int id) {
 	this->CheckMenuItem(id, FALSE);
 }
 
+void
+MENU::SetDefaultItem(int id) {
+	::SetMenuDefaultItem(*this, id, FALSE);   // FALSE = by command id
+}
+
 BOOL
 MENU::IsFlags(int id, int flags) {
 	return ((::GetMenuState(*this, id, MF_BYCOMMAND) & flags) != 0);

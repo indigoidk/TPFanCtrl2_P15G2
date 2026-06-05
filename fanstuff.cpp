@@ -192,6 +192,9 @@ FANCONTROL::HandleData(void) {
 
 	this->UpdateTempList();
 
+	// keep the manual box/slider enabled state in sync with the current mode
+	this->UpdateManualControlsEnabled();
+
 	this->icontemp = this->BiasedTemp(this->State.Sensors[iMaxTemp], iMaxTemp);
 
 	// compact single line status (combined). Use the same <128 validity test

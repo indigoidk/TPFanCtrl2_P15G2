@@ -30,7 +30,7 @@ EXSTYLE WS_EX_TOPMOST | WS_EX_TOOLWINDOW
 CAPTION "TPFanControl v2.33 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "TPFanControl v2.33 P15G2 Dual",IDC_STATIC,97,7,157,134
+    GROUPBOX        "Fan Control",IDC_STATIC,97,7,157,134
     LTEXT           "TPControlFAN",8115,103,16,145,8
     LTEXT           "State",IDC_STATIC,103,36,21,8
     EDITTEXT        8100,126,34,121,13,ES_AUTOHSCROLL | ES_READONLY
@@ -51,7 +51,7 @@ BEGIN
     CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,70,148
     GROUPBOX        "Status",9199,97,145,157,48
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
-    LTEXT           "Last",9196,103,169,21,8
+    LTEXT           "Last change",9196,103,169,50,8
     EDITTEXT        8113,103,179,145,12,ES_AUTOHSCROLL | ES_READONLY
     GROUPBOX        "Log (see TPFanControl.log)",9201,260,7,303,172
     EDITTEXT        9200,269,18,287,156,ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_READONLY | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL
@@ -96,7 +96,7 @@ STYLE DS_SETFONT | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CAPTION 
 CAPTION "TPFanControl v2.33 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    GROUPBOX        "TPFanControl v2.33 P15G2 Dual",IDC_STATIC,97,7,155,134
+    GROUPBOX        "Fan Control",IDC_STATIC,97,7,155,134
     LTEXT           "TPControlFAN",8115,103,16,145,8
     LTEXT           "State",IDC_STATIC,103,36,21,8
     EDITTEXT        8100,126,34,121,13,ES_AUTOHSCROLL | ES_READONLY
@@ -117,7 +117,7 @@ BEGIN
     CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,70,148
     GROUPBOX        "Status",9199,97,145,157,48
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
-    LTEXT           "Last",9196,103,169,21,8
+    LTEXT           "Last change",9196,103,169,50,8
     EDITTEXT        8113,103,179,145,12,ES_AUTOHSCROLL | ES_READONLY
     GROUPBOX        "Log (see TPFanControl.log)",9201,256,7,307,172
     EDITTEXT        9200,266,18,290,156,ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_READONLY | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL
@@ -178,10 +178,13 @@ BEGIN
     LTEXT           "Poll interval (seconds):",IDC_STATIC,14,175,80,8
     EDITTEXT        9310,98,173,30,13,ES_AUTOHSCROLL | ES_NUMBER
     GROUPBOX        "Icon color thresholds",IDC_STATIC,7,197,216,42
-    LTEXT           "warm / hot / critical",9319,14,209,200,9
+    LTEXT           "Warm",9315,14,209,42,8
+    LTEXT           "Hot",9316,60,209,42,8
+    LTEXT           "Critical",9317,106,209,42,8
     EDITTEXT        9311,14,221,40,13,ES_AUTOHSCROLL | ES_NUMBER
     EDITTEXT        9312,60,221,40,13,ES_AUTOHSCROLL | ES_NUMBER
     EDITTEXT        9313,106,221,40,13,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "",9319,151,223,65,9
     GROUPBOX        "Behavior",IDC_STATIC,7,243,216,60
     CONTROL         "Color tray icon by fan speed (else by temperature)",9321,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,256,205,10
     CONTROL         "Apply sensor offsets to displayed temperatures",9322,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,269,205,10
@@ -279,21 +282,23 @@ END
 
 5000 MENU
 BEGIN
-    MENUITEM "Show Window",                 5010
-    MENUITEM "Hide Window",                 5030
-    MENUITEM "Symbol Icon",                 5070
-    MENUITEM "Text Icon",                   5080
+    MENUITEM "Sho&w Window",                5010
+    MENUITEM "&Hide Window",                5030
+    MENUITEM "S&ymbol Icon",                5070
+    MENUITEM "&Text Icon",                  5080
     MENUITEM SEPARATOR
-    MENUITEM "Settings...",                 5100
-    MENUITEM "Edit Fan Curve...",           5110
+    MENUITEM "&Settings...",                5100
+    MENUITEM "Edit Fan &Curve...",          5110
+    MENUITEM "Open &Log File",              5120
+    MENUITEM "Open Co&nfig (ini)",          5130
     MENUITEM SEPARATOR
-    MENUITEM "Game Mode (Hide Drivers)",    5090
+    MENUITEM "&Game Mode (Hide Drivers)",   5090
     MENUITEM SEPARATOR
-    MENUITEM "BIOS Mode",                   5001
-    MENUITEM "Smart Mode",                  5002
-    MENUITEM "Manual Mode",                 5005
+    MENUITEM "&BIOS Mode",                  5001
+    MENUITEM "S&mart Mode",                 5002
+    MENUITEM "Manu&al Mode",                5005
     MENUITEM SEPARATOR
-    MENUITEM "Exit",                        5020
+    MENUITEM "E&xit",                       5020
 END
 
 

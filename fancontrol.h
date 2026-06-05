@@ -296,6 +296,14 @@ protected:
 	// window or control is missing). m_hwndTip is created once on first use.
 	void AddTip(int ctrlId, const char* text);
 
+	// gather the live State/Switch/Fan/Temperature fields into a text block and
+	// put it on the clipboard (right-click "Copy readings" on the main dialog)
+	void CopyReadingsToClipboard();
+
+	// grey out the manual fan-level box + slider unless Manual mode is active, so
+	// disabled controls reflect what actually applies to the current mode
+	void UpdateManualControlsEnabled();
+
 	// for detecting lid closing
 	HPOWERNOTIFY hPowerNotify;
 	bool isLidClosed = false;
