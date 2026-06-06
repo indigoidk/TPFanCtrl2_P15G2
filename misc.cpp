@@ -758,7 +758,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"# Leave Manual mode if temperature reaches this (deg C)\r\n"
 				"ManModeExit=80\r\n"
 				"\r\n"
-				"# Thermal fail-safe: force fan level 7 when the max temperature\r\n"
+				"# Thermal fail-safe: force full fan speed (max) when the max temperature\r\n"
 				"# reaches this (deg C), in Smart/Manual mode, until ~3 deg below.\r\n"
 				"# 0 = disabled.\r\n"
 				"FailsafeTemp=0\r\n",

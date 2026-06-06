@@ -1009,7 +1009,7 @@ FANCONTROL::UpdateTempList() {
 	// Build every visible row plus a signature of everything that affects the
 	// rendering. This runs each poll cycle, so bail out before touching the
 	// RichEdit when nothing visible has changed since the last render.
-	struct { COLORREF color; char line[128]; } rows[12];
+	struct { COLORREF color; bool isMax; char line[128]; } rows[12];
 	int nrows = 0;
 	// sized for the worst case (12 rows * (color + ':' + 128-char line) + header)
 	// and appended through a bounds guard so siglen can never pass the buffer end
@@ -1044,7 +1044,13 @@ FANCONTROL::UpdateTempList() {
 			strcpy_s(obuf2, sizeof(obuf2), "n/a");
 		}
 
+		// the sensor currently driving MaxTemp gets a bold row so the user can see
+		// at a glance which reading the fan logic is reacting to. Guard on MaxTemp > 0
+		// so that "no sensor won" (iMaxTemp left at its default 0) doesn't bold row 0.
+		bool isMax = valid && (i == this->iMaxTemp) && this->MaxTemp > 0;
+
 		rows[nrows].color = lineColor;
+		rows[nrows].isMax = isMax;
 		if (this->ShowTempHex)
 			sprintf_s(rows[nrows].line, sizeof(rows[nrows].line), "%s\t%s\t(0x%02x)\r\n",
 				this->State.SensorName[i], obuf2, this->State.SensorAddr[i]);
@@ -1053,8 +1059,8 @@ FANCONTROL::UpdateTempList() {
 				this->State.SensorName[i], obuf2);
 
 		if (siglen >= 0 && siglen < (int)sizeof(sig)) {
-			int n = sprintf_s(sig + siglen, sizeof(sig) - siglen, "%lu:%s",
-				(unsigned long)lineColor, rows[nrows].line);
+			int n = sprintf_s(sig + siglen, sizeof(sig) - siglen, "%lu%c:%s",
+				(unsigned long)lineColor, isMax ? '*' : '-', rows[nrows].line);
 			if (n > 0) siglen += n;
 		}
 		nrows++;
@@ -1099,8 +1105,8 @@ FANCONTROL::UpdateTempList() {
 
 		CHARFORMAT cf = {};
 		cf.cbSize = sizeof(CHARFORMAT);
-		cf.dwMask = CFM_COLOR | CFM_BOLD;   // clear bold so rows aren't bold like the header
-		cf.dwEffects = 0;
+		cf.dwMask = CFM_COLOR | CFM_BOLD;   // bold only the max-driving row
+		cf.dwEffects = rows[r].isMax ? CFE_BOLD : 0;
 		cf.crTextColor = rows[r].color;
 		::SendMessage(hRich, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
 
@@ -1571,6 +1577,13 @@ FANCONTROL::UpdateManualControlsEnabled() {
 	if (hSld) {
 		::EnableWindow(hSld, manual);
 		::ShowWindow(hSld, manual ? SW_SHOW : SW_HIDE);
+	}
+
+	// the slider's tick labels (0..7, Max) must hide/show with the slider itself,
+	// otherwise a row of orphaned numbers floats under empty space in BIOS/Smart.
+	for (int id = 8320; id <= 8328; id++) {
+		HWND h = ::GetDlgItem(this->hwndDialog, id);
+		if (h) ::ShowWindow(h, manual ? SW_SHOW : SW_HIDE);
 	}
 }
 
@@ -2658,8 +2671,8 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				"Ignore external / secondary temperature sensors when reading temps.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9325,
 				"Thermal fail-safe: if the max temperature reaches this value (in "
-				"Smart or Manual mode), the fan is forced to level 7 until it cools "
-				"~3 degrees below. 0 disables it. Independent of the fan curve.");
+				"Smart or Manual mode), the fan is forced to full speed (max) until "
+				"it cools ~3 degrees below. 0 disables it. Independent of the fan curve.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9330,
 				"Open the Smart fan-curve editor (temperature -> fan level table).");
 		}

@@ -290,6 +290,25 @@ FANCONTROL::HandleData(void) {
 	::SetDlgItemText(this->hwndDialog, 8115,
 		(this->CurrentMode == 2 || this->CurrentMode == 3) ? "TPControlFAN = On" : "TPControlFAN = OFF");
 
+	// thermal fail-safe (Smart/Manual only): if the max temperature reaches
+	// FailsafeTemp, force full fan speed (0x40 = max airflow, not merely level 7)
+	// regardless of the curve/manual level, and hold it until ~3 C below
+	// (hysteresis). Guards against a curve or a stuck manual level that would
+	// otherwise let the machine overheat. Evaluate the trip BEFORE the per-mode
+	// control below so that mode can defer to it this cycle - otherwise Smart/
+	// Manual writes a lower level and the fail-safe immediately overrides it back
+	// to max every poll, doubling EC writes and log spam during an overheat.
+	if (this->FailsafeTemp > 0 && this->ActiveMode &&
+		(this->CurrentMode == 2 || this->CurrentMode == 3)) {
+		if (!this->m_failsafeTripped && this->MaxTemp >= this->FailsafeTemp)
+			this->m_failsafeTripped = true;
+		else if (this->m_failsafeTripped && this->MaxTemp <= this->FailsafeTemp - 3)
+			this->m_failsafeTripped = false;
+	}
+	else {
+		this->m_failsafeTripped = false;   // disabled, or mode left Smart/Manual
+	}
+
 	switch (this->CurrentMode) {
 
 	case 1: // BIOS
@@ -300,7 +319,10 @@ FANCONTROL::HandleData(void) {
 		break;
 
 	case 2: // Smart
-		this->SmartControl();
+		if (!this->m_failsafeTripped)   // fail-safe holds the fan; skip curve control
+			this->SmartControl();       // (logs its own mode-change transition)
+		else
+			this->TraceModeChange();    // still log a transition while the fail-safe holds
 		break;
 
 	case 3: // Manual
@@ -308,7 +330,8 @@ FANCONTROL::HandleData(void) {
 
 		::GetDlgItemText(this->hwndDialog, 8310, manlevel, sizeof(manlevel));
 
-		if (isdigit(manlevel[0]) && atoi(manlevel) >= 0 && atoi(manlevel) <= 255) {
+		if (!this->m_failsafeTripped &&
+			isdigit(manlevel[0]) && atoi(manlevel) >= 0 && atoi(manlevel) <= 255) {
 			if (this->State.FanCtrl != atoi(manlevel))
 				ok = this->SetFan("Manual", atoi(manlevel));
 			else
@@ -320,23 +343,9 @@ FANCONTROL::HandleData(void) {
 
 	this->PreviousMode = this->CurrentMode;
 
-	// thermal fail-safe (Smart/Manual only): if the max temperature reaches
-	// FailsafeTemp, force the top fan level regardless of the curve/manual level,
-	// and hold it until ~3 C below (hysteresis). Guards against a curve or a stuck
-	// manual level that would otherwise let the machine overheat.
-	if (this->FailsafeTemp > 0 && this->ActiveMode &&
-		(this->CurrentMode == 2 || this->CurrentMode == 3)) {
-		if (!this->m_failsafeTripped && this->MaxTemp >= this->FailsafeTemp)
-			this->m_failsafeTripped = true;
-		else if (this->m_failsafeTripped && this->MaxTemp <= this->FailsafeTemp - 3)
-			this->m_failsafeTripped = false;
-
-		if (this->m_failsafeTripped && this->State.FanCtrl != 7)
-			ok = this->SetFan("Fail-safe: max temp reached, forcing fan 7", 7);
-	}
-	else if (this->m_failsafeTripped) {
-		this->m_failsafeTripped = false;   // mode left Smart/Manual: clear the trip
-	}
+	// apply the fail-safe override (full speed) once per cycle while tripped
+	if (this->m_failsafeTripped && this->State.FanCtrl != 0x40)
+		ok = this->SetFan("Fail-safe: max temp reached, forcing full fan speed", 0x40);
 
 	if (this->CurrentMode == 3 && this->MaxTemp > this->ManModeExitInternal)
 		this->CurrentMode = 2;

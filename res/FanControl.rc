@@ -47,15 +47,15 @@ BEGIN
     EDITTEXT        8310,171,105,32,14,ES_AUTOHSCROLL | ES_NUMBER
     LTEXT           "0-7, 64 = Max",IDC_STATIC,207,107,60,8
     CONTROL         "",8311,"msctls_trackbar32",TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP,103,126,148,11
-    CTEXT           "0",IDC_STATIC,102,137,12,8
-    CTEXT           "1",IDC_STATIC,119,137,12,8
-    CTEXT           "2",IDC_STATIC,137,137,12,8
-    CTEXT           "3",IDC_STATIC,154,137,12,8
-    CTEXT           "4",IDC_STATIC,171,137,12,8
-    CTEXT           "5",IDC_STATIC,188,137,12,8
-    CTEXT           "6",IDC_STATIC,206,137,12,8
-    CTEXT           "7",IDC_STATIC,223,137,12,8
-    CTEXT           "Max",IDC_STATIC,236,137,20,8
+    CTEXT           "0",8320,102,137,12,8
+    CTEXT           "1",8321,119,137,12,8
+    CTEXT           "2",8322,137,137,12,8
+    CTEXT           "3",8323,154,137,12,8
+    CTEXT           "4",8324,171,137,12,8
+    CTEXT           "5",8325,188,137,12,8
+    CTEXT           "6",8326,206,137,12,8
+    CTEXT           "7",8327,223,137,12,8
+    CTEXT           "Max",8328,236,137,20,8
     LTEXT           "Temperatures",9198,9,7,80,9
     CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,78,74
     LTEXT           "Status",9199,99,145,120,9
@@ -121,15 +121,15 @@ BEGIN
     EDITTEXT        8310,171,105,25,14,ES_AUTOHSCROLL | ES_NUMBER
     LTEXT           "0-7, 64 = Max",IDC_STATIC,199,107,60,8
     CONTROL         "",8311,"msctls_trackbar32",TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP,103,126,145,11
-    CTEXT           "0",IDC_STATIC,102,137,12,8
-    CTEXT           "1",IDC_STATIC,119,137,12,8
-    CTEXT           "2",IDC_STATIC,136,137,12,8
-    CTEXT           "3",IDC_STATIC,153,137,12,8
-    CTEXT           "4",IDC_STATIC,170,137,12,8
-    CTEXT           "5",IDC_STATIC,186,137,12,8
-    CTEXT           "6",IDC_STATIC,203,137,12,8
-    CTEXT           "7",IDC_STATIC,220,137,12,8
-    CTEXT           "Max",IDC_STATIC,234,137,20,8
+    CTEXT           "0",8320,102,137,12,8
+    CTEXT           "1",8321,119,137,12,8
+    CTEXT           "2",8322,136,137,12,8
+    CTEXT           "3",8323,153,137,12,8
+    CTEXT           "4",8324,170,137,12,8
+    CTEXT           "5",8325,186,137,12,8
+    CTEXT           "6",8326,203,137,12,8
+    CTEXT           "7",8327,220,137,12,8
+    CTEXT           "Max",8328,234,137,20,8
     LTEXT           "Temperatures",9198,9,7,80,9
     CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,78,74
     LTEXT           "Status",9199,99,145,120,9
@@ -206,7 +206,7 @@ BEGIN
     CONTROL         "Apply sensor offsets to displayed temperatures",9322,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,240,205,10
     CONTROL         "Skip external / secondary temp sensors",9324,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,253,205,10
     LTEXT           "Safety",IDC_STATIC,7,267,200,9
-    LTEXT           "Force fan 7 when max temp reaches (0 = off):",IDC_STATIC,14,279,170,8
+    LTEXT           "Force max fan at temp (0 = off):",IDC_STATIC,14,279,148,8
     EDITTEXT        9325,165,277,30,13,ES_AUTOHSCROLL | ES_NUMBER
     LTEXT           "",9326,199,279,16,8
     PUSHBUTTON      "Fan curve...",9330,7,300,52,14
