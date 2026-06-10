@@ -105,6 +105,7 @@ void CSystemTray::Initialise() {
 	m_pThis = this;
 
 	memset(&m_tnd, 0, sizeof(m_tnd));
+	m_lastTip[0] = 0;          // force the first SetTooltipText to actually send
 	m_bEnabled = FALSE;
 	m_bHidden = TRUE;
 	m_bRemoved = TRUE;
@@ -319,6 +320,8 @@ BOOL CSystemTray::RemoveIcon() {
 	if (Shell_NotifyIcon(NIM_DELETE, &m_tnd))
 		m_bRemoved = m_bHidden = TRUE;
 
+	m_lastTip[0] = 0;          // a re-added icon must get its tooltip set afresh
+
 	return (m_bRemoved == TRUE);
 }
 
@@ -507,6 +510,13 @@ BOOL CSystemTray::SetTooltipText(LPCTSTR pszTip) {
 
 	if (!m_bEnabled)
 		return FALSE;
+
+	// The text icon refreshes ~1-2x/sec, but the tooltip text only changes on a
+	// real fan/temp update. Skip the cross-process Shell_NotifyIcon(NIM_MODIFY)
+	// when the text is unchanged (mirrors TASKBARICON::SetTooltip in winstuff.cpp).
+	if (_tcscmp(m_lastTip, pszTip) == 0)
+		return TRUE;
+	_tcsncpy_s(m_lastTip, _countof(m_lastTip), pszTip, _TRUNCATE);
 
 	m_tnd.uFlags = NIF_TIP;
 	_tcsncpy_s(m_tnd.szTip, sizeof(m_tnd.szTip), pszTip, m_nMaxTooltipLength - 1);

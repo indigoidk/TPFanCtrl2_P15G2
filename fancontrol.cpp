@@ -345,11 +345,13 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	this->AddTip(8302, "Manual mode: hold a fixed fan level you choose with the box "
 	                   "and slider below. The fan will not auto-adjust.");
 	this->AddTip(8310, "Manual fan level: 0 = off, 1-7 = increasing speed, "
-	                   "64 = maximum. Typing here switches to Manual mode.");
+	                   "64 = maximum. Select Manual mode first to enable this box.");
 	this->AddTip(8311, "Drag to set the manual fan level: 0 = off, 1-7 = increasing "
 	                   "speed, far right = MAX. Using the slider switches to Manual mode.");
 	this->AddTip(8101, "Per-sensor temperatures. 'active' shows only sensors with a "
 	                   "live reading; 'all' lists every EC sensor slot.");
+	this->AddTip(7001, "Show every EC temperature slot, including idle/unused sensors.");
+	this->AddTip(7002, "Show only sensors that currently report a live reading.");
 	this->AddTip(8120, "Temperature history sparkline of the max sensor. Shows current, "
 	                   "average and min-max for the window. Right-click to clear.");
 	this->AddTip(7013, "Renames TVicHW64.sys and TVicPort64.sys to .sys.bak "
@@ -445,7 +447,9 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 	m_fanTimer = ::SetTimer(this->hwndDialog, 1, this->Cycle * 1000, NULL);    // fan update
 	m_titleTimer = ::SetTimer(this->hwndDialog, 2, 500, NULL);                // title update
-	m_iconTimer = ::SetTimer(this->hwndDialog, 3, this->IconCycle * 1000, NULL); // Vista icon update
+	// No dedicated icon timer (id 3): the tray-icon refresh runs unconditionally
+	// after every WM_TIMER tick, so the 500ms title timer already updates it more
+	// often than IconCycle would. m_iconTimer stays NULL; its KillTimer calls no-op.
 	if (this->ReIcCycle)
 		m_renewTimer = ::SetTimer(this->hwndDialog, 4, this->ReIcCycle * 1000, NULL); // Vista icon update
 
@@ -524,6 +528,24 @@ FANCONTROL::CopyReadingsToClipboard() {
 }
 
 //-------------------------------------------------------------------------
+//  the "fan = maximum (64)" confirmation, shared by the slider and the typed
+//  edit-box path so the warning can't be bypassed by typing the value.
+//  Returns true to proceed to max, false if the user cancelled.
+//-------------------------------------------------------------------------
+bool
+FANCONTROL::ConfirmMaxFan() {
+	return ::MessageBoxA(this->hwndDialog,
+		"Setting the fan to maximum (64) runs it at full, "
+		"unregulated speed.\r\n\r\n"
+		"This is loud and bypasses normal speed regulation; "
+		"the firmware keeps the fan at full power until you "
+		"change the level. Use it only briefly to cool down a "
+		"hot machine.\r\n\r\nSet fan to maximum?",
+		"Maximum fan speed",
+		MB_OKCANCEL | MB_ICONWARNING) == IDOK;
+}
+
+//-------------------------------------------------------------------------
 //  destructor
 //-------------------------------------------------------------------------
 FANCONTROL::~FANCONTROL() {
@@ -563,6 +585,10 @@ FANCONTROL::~FANCONTROL() {
 	if (this->m_hFontBig) ::DeleteObject(this->m_hFontBig);
 	if (this->m_hFontTitle) ::DeleteObject(this->m_hFontTitle);
 	if (this->m_hFontDlg) ::DeleteObject(this->m_hFontDlg);
+
+	// release the cached sparkline back-buffer (process-lifetime, recreated on resize)
+	if (this->m_sparkBmp) ::DeleteObject(this->m_sparkBmp);
+	if (this->m_sparkDC)  ::DeleteDC(this->m_sparkDC);
 
 	if (pTextIconMutex)
 		delete pTextIconMutex;
@@ -855,6 +881,10 @@ FANCONTROL::InitThemeAndChrome() {
 			this->ManFanSpeed >= 64 ? 8 : (this->ManFanSpeed > 7 ? 7 : this->ManFanSpeed));
 	}
 
+	// cap the manual fan-level box to 3 digits so 4+ digit junk can't be typed
+	// (the value is also validated against the legal set when applied in HandleData)
+	::SendDlgItemMessage(this->hwndDialog, 8310, EM_LIMITTEXT, 3, 0);
+
 	this->ReflowLayout();      // capture design geometry before any resize
 	this->ApplyLogVisibility();
 
@@ -904,6 +934,25 @@ FANCONTROL::ApplyLogVisibility() {
 //-------------------------------------------------------------------------
 void
 FANCONTROL::ToggleGameMode(bool silent) {
+	// Confirm before HIDING drivers in an interactive toggle: this renames kernel
+	// drivers in System32, a privileged system-wide change. Restore, and any
+	// silent (exit/shutdown) call, is never gated.
+	if (!silent && !this->m_driversHidden) {
+		int a = ::MessageBoxA(this->hwndDialog,
+			"Game Mode renames the TVicHW64 / TVicPort64 kernel drivers in\r\n"
+			"C:\\Windows\\System32\\drivers so anti-cheat software (e.g. Vanguard)\r\n"
+			"cannot see them.\r\n\r\n"
+			"While hidden, fan control still works, but the drivers are only\r\n"
+			"restored on a clean exit (or recovered automatically on the next\r\n"
+			"launch). Continue?",
+			"Enable Game Mode (Hide Drivers)", MB_OKCANCEL | MB_ICONWARNING);
+		if (a != IDOK) {
+			// keep the in-window checkbox in sync with the unchanged (not-hidden) state
+			::SendDlgItemMessage(this->hwndDialog, 7013, BM_SETCHECK, BST_UNCHECKED, 0);
+			return;
+		}
+	}
+
 	static const char* const sys[2] = {
 		"C:\\Windows\\System32\\drivers\\TVicHW64.sys",
 		"C:\\Windows\\System32\\drivers\\TVicPort64.sys"
@@ -1163,7 +1212,7 @@ FANCONTROL::ReflowLayout() {
 	if (!this->hwndDialog) return;
 
 	// id, then anchor flags: add dW to x/w, dH to y/h
-	static const struct { int id, ax, ay, aw, ah; } A[17] = {
+	static const struct { int id, ax, ay, aw, ah; } A[18] = {
 		{ 9198, 0, 0, 0, 0 },   // 'Temperatures' header: fixed top-left
 		{ 8101, 0, 0, 0, 1 },   // temperature list:   grow height
 		{ 7001, 0, 1, 0, 0 },   // 'all'    radio: follow bottom
@@ -1180,7 +1229,8 @@ FANCONTROL::ReflowLayout() {
 		{ 7013, 0, 1, 0, 0 },   // Game mode checkbox: follow bottom
 		{ 9202, 0, 1, 0, 0 },   // 'Temperature history' header: follow bottom
 		{ 8120, 0, 1, 1, 0 },   // sparkline:          follow bottom, grow width
-		{ 5100, 0, 1, 0, 0 },   // Settings button: follow bottom (fixed pos/size)
+		{ 5100, 0, 1, 0, 0 },   // Settings button:  follow bottom (fixed pos/size)
+		{ 5110, 0, 1, 0, 0 },   // Fan curve button: follow bottom (fixed pos/size)
 	};
 
 	RECT rc;
@@ -1206,7 +1256,7 @@ FANCONTROL::ReflowLayout() {
 				if (narrow > 200) this->m_minW = narrow;
 			}
 		}
-		for (int i = 0; i < 17; i++) {
+		for (int i = 0; i < 18; i++) {
 			HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 			RECT r = { 0, 0, 0, 0 };
 			if (h) {
@@ -1222,8 +1272,8 @@ FANCONTROL::ReflowLayout() {
 	int dW = cw - this->m_baseCW;
 	int dH = ch - this->m_baseCH;
 
-	HDWP hdwp = ::BeginDeferWindowPos(17);
-	for (int i = 0; i < 17; i++) {
+	HDWP hdwp = ::BeginDeferWindowPos(18);
+	for (int i = 0; i < 18; i++) {
 		HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 		if (!h) continue;
 		// the temp list + all/active radios are sized to their content by
@@ -1374,10 +1424,20 @@ FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
 	// owner-draw static never shows a half-painted graph (no flicker on resize).
 	// carry over the control's font so the labels keep the dialog typeface.
 	HFONT  hFont = (HFONT)::GetCurrentObject(hdc, OBJ_FONT);
-	HDC    mdc   = ::CreateCompatibleDC(hdc);
-	HBITMAP mbm  = ::CreateCompatibleBitmap(hdc, w, h);
-	HGDIOBJ obm  = ::SelectObject(mdc, mbm);
-	HGDIOBJ ofn  = ::SelectObject(mdc, hFont);
+	// Reuse a cached memory DC + bitmap, recreating the bitmap only when the
+	// control size changes, so a click-drag resize no longer allocates a DC and a
+	// screen-compatible bitmap on every WM_PAINT. (Freed in the destructor.)
+	if (!this->m_sparkDC)
+		this->m_sparkDC = ::CreateCompatibleDC(hdc);
+	if (!this->m_sparkBmp || w != this->m_sparkW || h != this->m_sparkH) {
+		if (this->m_sparkBmp) ::DeleteObject(this->m_sparkBmp);
+		this->m_sparkBmp = ::CreateCompatibleBitmap(hdc, w, h);   // from hdc (color), not mdc (1bpp)
+		this->m_sparkW = w;
+		this->m_sparkH = h;
+	}
+	HDC     mdc = this->m_sparkDC;
+	HGDIOBJ obm = ::SelectObject(mdc, this->m_sparkBmp);
+	HGDIOBJ ofn = ::SelectObject(mdc, hFont);   // reselect each paint (font may change on theme/DPI)
 
 	RECT lrc = { 0, 0, w, h };
 	if (bg) ::FillRect(mdc, &lrc, bg);
@@ -1411,7 +1471,17 @@ FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
 	else if (latest >= this->IconLevels[0]) lineClr = RGB(220, 170, 0);
 	else                                    lineClr = RGB(0, 170, 0);
 
-	const int top = 1, bot = h - 2;   // 1px padding top/bottom (local coords)
+	// Reserve a top band for the value/range/avg labels so the trace and the peak
+	// ring don't render underneath them; skip the inset on a very short control.
+	int labelH = 0;
+	{
+		SIZE sz0 = { 0, 0 };
+		::GetTextExtentPoint32A(mdc, "0", 1, &sz0);
+		labelH = sz0.cy;
+	}
+	int top = 1;
+	if (h - 2 - labelH >= 6) top = labelH + 1;   // only inset when enough plot height remains
+	const int bot = h - 2;            // 1px padding bottom (local coords)
 	const int ploth = bot - top;
 
 	// faint gridlines at each IconLevel threshold that falls inside the range
@@ -1508,10 +1578,9 @@ FANCONTROL::DrawSparkline(HDC hdc, const RECT& rc) {
 
 	::BitBlt(hdc, rc.left, rc.top, w, h, mdc, 0, 0, SRCCOPY);
 
+	// restore selections but keep the cached DC + bitmap for the next paint
 	::SelectObject(mdc, ofn);
 	::SelectObject(mdc, obm);
-	::DeleteObject(mbm);
-	::DeleteDC(mdc);
 }
 
 //-------------------------------------------------------------------------
@@ -1581,6 +1650,7 @@ FANCONTROL::UpdateManualControlsEnabled() {
 
 	// the slider's tick labels (0..7, Max) must hide/show with the slider itself,
 	// otherwise a row of orphaned numbers floats under empty space in BIOS/Smart.
+	// ID range 8320-8328: keep in sync with BOTH dialog templates in res/FanControl.rc
 	for (int id = 8320; id <= 8328; id++) {
 		HWND h = ::GetDlgItem(this->hwndDialog, id);
 		if (h) ::ShowWindow(h, manual ? SW_SHOW : SW_HIDE);
@@ -1809,7 +1879,13 @@ FANCONTROL::DlgProc(HWND
 	{
 		DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)mp2;
 		if (dis && dis->CtlType == ODT_STATIC && dis->CtlID == 8120) {
-			this->DrawSparkline(dis->hDC, dis->rcItem);
+			if (this->ShowGraph)
+				this->DrawSparkline(dis->hDC, dis->rcItem);
+			else {
+				// graph hidden: just clear, skip the whole sparkline build
+				HBRUSH bg = this->m_hbrField ? this->m_hbrField : this->m_hbrDlg;
+				if (bg) ::FillRect(dis->hDC, &dis->rcItem, bg);
+			}
 			rc = TRUE;
 			break;
 		}
@@ -1899,16 +1975,7 @@ FANCONTROL::DlgProc(HWND
 				// repeat notification.
 				if (!this->m_maxWarned) {
 					this->m_maxWarned = true;
-					int answer = ::MessageBoxA(this->hwndDialog,
-						"Setting the fan to maximum (64) runs it at full, "
-						"unregulated speed.\r\n\r\n"
-						"This is loud and bypasses normal speed regulation; "
-						"the firmware keeps the fan at full power until you "
-						"change the level. Use it only briefly to cool down a "
-						"hot machine.\r\n\r\nSet fan to maximum?",
-						"Maximum fan speed",
-						MB_OKCANCEL | MB_ICONWARNING);
-					if (answer != IDOK) {
+					if (!this->ConfirmMaxFan()) {
 						// Cancelled: revert the slider to level 7 and apply that.
 						::SendMessage((HWND)mp2, TBM_SETPOS, TRUE, 7);
 						pos = 7;
@@ -2118,6 +2185,27 @@ FANCONTROL::DlgProc(HWND
 			if (cmd >= 8300 && cmd <= 8302 || cmd == 8310) {  // radio button or manual speed entry
 				if (cmd >= 8300 && cmd <= 8302)
 					this->UpdateManualControlsEnabled();   // reflect the new mode at once
+
+				// Typing the max value (64) must raise the same warning as dragging
+				// the slider to max, so the prompt can't be bypassed by typing it.
+				// Gate on the window being visible so the programmatic startup write
+				// (and a minimized start) never pops the dialog. One-shot via
+				// m_maxWarned; re-armed when the value drops back below max.
+				if (cmd == 8310 && ::IsWindowVisible(this->hwndDialog)) {
+					char b[16];
+					::GetDlgItemText(hwnd, 8310, b, sizeof(b));
+					int v = atoi(b);
+					if (v == 64) {
+						if (!this->m_maxWarned) {
+							this->m_maxWarned = true;
+							if (!this->ConfirmMaxFan())
+								::SetDlgItemText(hwnd, 8310, "7");   // re-enters EN_CHANGE; "7" re-arms
+						}
+					}
+					else if (v < 64)
+						this->m_maxWarned = false;
+				}
+
 				::PostMessage(hwnd, WM__GETDATA, 0, 0);
 			}
 			else
@@ -2237,7 +2325,7 @@ FANCONTROL::DlgProc(HWND
 					}
 
 					// don't close if we can't set the fan back to bios controlled
-					if (!this->ActiveMode || this->SetFan("On close", 0x80, true)) {
+					if (!this->ActiveMode || this->SetFan("On close", FAN_CTRL_BIOS, true)) {
 						// remember where the window was for next launch
 						this->SaveWindowPos("TPFanControl.ini");
 						::KillTimer(this->hwndDialog, m_fanTimer);
@@ -2273,7 +2361,7 @@ FANCONTROL::DlgProc(HWND
 					this->previousModeBeforeLidClose = this->CurrentMode;
 					this->Trace("Lid closed detected, will close to BIOS mode.");
 					this->ModeToDialog(1);
-					ok = this->SetFan("Lid close, Switch to BIOS Mode", 0x80);
+					ok = this->SetFan("Lid close, Switch to BIOS Mode", FAN_CTRL_BIOS);
 					if (ok) {
 						this->Trace("Set to BIOS Mode");
 						::Sleep(1000);
@@ -2323,7 +2411,7 @@ FANCONTROL::DlgProc(HWND
 			// bounded retry and traces its own OK/FAILED result; best-effort, and
 			// won't hang shutdown.
 			if (this->ActiveMode)
-				this->SetFan("On shutdown", 0x80, true);
+				this->SetFan("On shutdown", FAN_CTRL_BIOS, true);
 
 			::KillTimer(this->hwndDialog, m_fanTimer);
 			::KillTimer(this->hwndDialog, m_titleTimer);
@@ -2427,7 +2515,7 @@ FANCONTROL::DlgProc(HWND
 			// after so many consecutive read errors, try to switch back to bios mode
 			if (this->ReadErrorCount > this->MaxReadErrors) {
 				this->ModeToDialog(1);
-				ok = this->SetFan("Max. Errors", 0x80);
+				ok = this->SetFan("Max. Errors", FAN_CTRL_BIOS);
 				if (ok) {
 					this->Trace("Set to BIOS Mode, to many consecutive read errors");
 					::Sleep(2000);
@@ -2476,7 +2564,7 @@ FANCONTROL::DlgProc(HWND
 
 		case WM_RBUTTONDOWN:
 		{
-			unsigned char testpara;
+			unsigned char testpara = 0;   // ReadByteFromEC leaves *pdata untouched on failure
 			MENU m(5000);
 
 			if (!this->LockECAccess()) break;
@@ -2676,7 +2764,11 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9330,
 				"Open the Smart fan-curve editor (temperature -> fan level table).");
 		}
-		return TRUE;
+		// land initial keyboard focus on the poll-interval field (the most-changed
+		// setting) instead of the first checkbox; return FALSE so the dialog manager
+		// does not override the focus we just set.
+		::SetFocus(::GetDlgItem(hwnd, 9310));
+		return FALSE;
 
 	case WM_CTLCOLORDLG:
 		if (self) return (INT_PTR)self->m_hbrDlg;

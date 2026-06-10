@@ -30,6 +30,19 @@
 #define TP_ECVALUE_SELFAN2      (char)0x0001
 
 //-------------------------------------------------------------------------
+//  Set a dialog control's text only when it differs from the last value we
+//  wrote, so an unchanged per-poll readout doesn't trigger a redundant
+//  WM_SETTEXT (which invalidates/repaints the control even for identical text).
+//-------------------------------------------------------------------------
+static void
+SetDlgTextIfChanged(HWND dlg, int id, const char* s, char* cache, size_t n) {
+	if (strcmp(cache, s) != 0) {
+		strcpy_s(cache, n, s);
+		::SetDlgItemText(dlg, id, s);
+	}
+}
+
+//-------------------------------------------------------------------------
 //  log a "Change Mode from <prev>-><cur>" line; nothing if the mode is unchanged
 //-------------------------------------------------------------------------
 void
@@ -79,31 +92,23 @@ FANCONTROL::HandleData(void) {
 	// determine highest temp.
 	//
 
-	// build a list of sensors to ignore, separated by "|", e.g. "|XC1|BAT|CPU|"
-	char what[16], list[128];
-	sprintf_s(list, sizeof(list), "|%s|", this->IgnoreSensors);
-	for (i = 0; list[i] != '\0'; i++) {
-		if (list[i] == ',')
-			list[i] = '|';
-	}
-	// sensor names are stored uppercase (CPU, GPU, ...), but the ini tells users
-	// to enter IgnoreSensors in lower case. Uppercase the list so the match is
-	// effectively case-insensitive and "pci,aps" actually ignores PCI/APS.
-	_strupr_s(list, sizeof(list));
-
+	// The ignore list (IgnoreSensors) and the sensor names are constant after
+	// config load, so the normalized pipe-delimited list and per-sensor "ignored"
+	// membership are precomputed once in BuildIgnoreCache() (see m_sensorIgnored)
+	// instead of rebuilding sprintf+_strupr_s+strstr on every poll.
 	maxtemp = 0;
 	imaxtemp = 0;
 	int senstemp;
 	for (i = 0; i < 12; i++) {
-		sprintf_s(what, sizeof(what), "|%s|", this->State.SensorName[i]); // name (e.g. "|CPU|") to match against list above
-
-		if (this->State.Sensors[i] != 0x80 && this->State.Sensors[i] != 0x00 && strstr(list, what) == 0) {
+		if (this->State.Sensors[i] != 0x80 && this->State.Sensors[i] != 0x00 && !this->m_sensorIgnored[i]) {
 			senstemp = this->BiasedTemp(this->State.Sensors[i], i);
 
-			if (senstemp < 128) {
-				maxtemp = __max(senstemp, maxtemp);
-				if (maxtemp <= senstemp)
-					imaxtemp = i;
+			// strict compare keeps the FIRST sensor that reached the max, so a later
+			// sensor merely tying it does not steal iMaxTemp (and the bold temp-list
+			// row) back and forth every poll cycle
+			if (senstemp < 128 && senstemp > maxtemp) {
+				maxtemp = senstemp;
+				imaxtemp = i;
 			}
 		}
 	}
@@ -113,7 +118,7 @@ FANCONTROL::HandleData(void) {
 
 	// record this reading and refresh the history sparkline (owner-draw static 8120)
 	this->PushTempSample(this->MaxTemp);
-	{
+	if (this->ShowGraph) {   // skip when the graph is hidden; history is still recorded above
 		HWND hSpark = ::GetDlgItem(this->hwndDialog, 8120);
 		if (hSpark) ::InvalidateRect(hSpark, NULL, FALSE);
 	}
@@ -157,7 +162,7 @@ FANCONTROL::HandleData(void) {
 		}
 	}
 
-	::SetDlgItemText(this->hwndDialog, 8100, obuf2);
+	SetDlgTextIfChanged(this->hwndDialog, 8100, obuf2, this->m_lastState, sizeof(this->m_lastState));
 
 	strcpy_s(this->Title2, sizeof(this->Title2), title2);
 
@@ -196,8 +201,8 @@ FANCONTROL::HandleData(void) {
 		}
 
 		char fanStr[16];
-		if (fanctrl & 0x80)              strcpy_s(fanStr, sizeof(fanStr), "BIOS");
-		else if ((fanctrl & 0x7f) == 64) strcpy_s(fanStr, sizeof(fanStr), "max");
+		if (fanctrl & FAN_CTRL_BIOS)                   strcpy_s(fanStr, sizeof(fanStr), "BIOS");
+		else if ((fanctrl & 0x7f) == FAN_CTRL_FULL)    strcpy_s(fanStr, sizeof(fanStr), "max");
 		else                             sprintf_s(fanStr, sizeof(fanStr), "%d", fanctrl & 0x7f);
 
 		sprintf_s(this->TrayTip, sizeof(this->TrayTip),
@@ -223,10 +228,10 @@ FANCONTROL::HandleData(void) {
 	}
 
 	sprintf_s(obuf2, sizeof(obuf2), "%d RPM", this->fan1speed);
-	::SetDlgItemText(this->hwndDialog, 8102, obuf2);
+	SetDlgTextIfChanged(this->hwndDialog, 8102, obuf2, this->m_lastFan1, sizeof(this->m_lastFan1));
 
 	sprintf_s(obuf2, sizeof(obuf2), "%d RPM", this->fan2speed);
-	::SetDlgItemText(this->hwndDialog, 8104, obuf2);
+	SetDlgTextIfChanged(this->hwndDialog, 8104, obuf2, this->m_lastFan2, sizeof(this->m_lastFan2));
 
 	// display temperature list
 	if (Fahrenheit)
@@ -234,7 +239,7 @@ FANCONTROL::HandleData(void) {
 	else
 		sprintf_s(obuf2, sizeof(obuf2), "%d° C", this->MaxTemp);
 
-	::SetDlgItemText(this->hwndDialog, 8103, obuf2);
+	SetDlgTextIfChanged(this->hwndDialog, 8103, obuf2, this->m_lastMaxT, sizeof(this->m_lastMaxT));
 
 	this->UpdateTempList();
 
@@ -270,15 +275,12 @@ FANCONTROL::HandleData(void) {
 
 	// display fan speed
 
-	if (fan1speed > 0x1fff)
-		fan1speed = lastfan1speed;
-	if (fan2speed > 0x1fff)
-		fan2speed = lastfan2speed;
+	// fan1speed/fan2speed were already clamped to <= 0x1fff when decoded above
 	sprintf_s(obuf2, sizeof(obuf2), "%d/%d", this->fan1speed, this->fan2speed);
 
 	sprintf_s(CurrentStatuscsv, sizeof(CurrentStatuscsv), "%s %s; %d; %d; ", templist, obuf2, State.FanCtrl, MaxTemp);
 
-	::SetDlgItemText(this->hwndDialog, 8112, this->CurrentStatus);
+	SetDlgTextIfChanged(this->hwndDialog, 8112, this->CurrentStatus, this->m_lastStatus, sizeof(this->m_lastStatus));
 
 	//
 	// handle fan control according to mode
@@ -287,8 +289,9 @@ FANCONTROL::HandleData(void) {
 	this->CurrentModeFromDialog();
 	this->ShowAllFromDialog();
 
-	::SetDlgItemText(this->hwndDialog, 8115,
-		(this->CurrentMode == 2 || this->CurrentMode == 3) ? "TPControlFAN = On" : "TPControlFAN = OFF");
+	SetDlgTextIfChanged(this->hwndDialog, 8115,
+		(this->CurrentMode == 2 || this->CurrentMode == 3) ? "TPControlFAN = On" : "TPControlFAN = OFF",
+		this->m_lastTpf, sizeof(this->m_lastTpf));
 
 	// thermal fail-safe (Smart/Manual only): if the max temperature reaches
 	// FailsafeTemp, force full fan speed (0x40 = max airflow, not merely level 7)
@@ -300,13 +303,32 @@ FANCONTROL::HandleData(void) {
 	// to max every poll, doubling EC writes and log spam during an overheat.
 	if (this->FailsafeTemp > 0 && this->ActiveMode &&
 		(this->CurrentMode == 2 || this->CurrentMode == 3)) {
-		if (!this->m_failsafeTripped && this->MaxTemp >= this->FailsafeTemp)
+		// log both flag transitions explicitly: SetFan only logs when it has to
+		// write, so a trip with the fan already at max would otherwise leave no
+		// record in the trace - exactly the event worth a timestamp after a
+		// thermal incident
+		char fsbuf[128];
+		if (!this->m_failsafeTripped && this->MaxTemp >= this->FailsafeTemp) {
 			this->m_failsafeTripped = true;
-		else if (this->m_failsafeTripped && this->MaxTemp <= this->FailsafeTemp - 3)
+			sprintf_s(fsbuf, sizeof(fsbuf),
+				"Fail-safe TRIPPED: max temp %d C reached threshold %d C, forcing full fan speed",
+				this->MaxTemp, this->FailsafeTemp);
+			this->Trace(fsbuf);
+		}
+		else if (this->m_failsafeTripped && this->MaxTemp <= this->FailsafeTemp - 3) {
 			this->m_failsafeTripped = false;
+			this->m_failsafeWriteWarned = false;
+			sprintf_s(fsbuf, sizeof(fsbuf),
+				"Fail-safe released: max temp %d C cooled below %d C",
+				this->MaxTemp, this->FailsafeTemp - 3);
+			this->Trace(fsbuf);
+		}
 	}
 	else {
+		if (this->m_failsafeTripped)
+			this->Trace("Fail-safe released: disabled or mode left Smart/Manual");
 		this->m_failsafeTripped = false;   // disabled, or mode left Smart/Manual
+		this->m_failsafeWriteWarned = false;
 	}
 
 	switch (this->CurrentMode) {
@@ -314,41 +336,62 @@ FANCONTROL::HandleData(void) {
 	case 1: // BIOS
 		this->TraceModeChange();
 
-		if (this->State.FanCtrl != 0x080)
-			ok = this->SetFan("BIOS", 0x80);
+		if (this->State.FanCtrl != FAN_CTRL_BIOS)
+			ok = this->SetFan("BIOS", FAN_CTRL_BIOS);
 		break;
 
 	case 2: // Smart
 		if (!this->m_failsafeTripped)   // fail-safe holds the fan; skip curve control
 			this->SmartControl();       // (logs its own mode-change transition)
 		else
-			this->TraceModeChange();    // still log a transition while the fail-safe holds
+			this->TraceModeChange();    // logs only an actual mode change arriving while the fail-safe holds
 		break;
 
-	case 3: // Manual
+	case 3: { // Manual
 		this->TraceModeChange();
 
 		::GetDlgItemText(this->hwndDialog, 8310, manlevel, sizeof(manlevel));
 
-		if (!this->m_failsafeTripped &&
-			isdigit(manlevel[0]) && atoi(manlevel) >= 0 && atoi(manlevel) <= 255) {
-			if (this->State.FanCtrl != atoi(manlevel))
-				ok = this->SetFan("Manual", atoi(manlevel));
+		// Only the documented set is a valid EC fan byte: levels 0-7, or 64 = full
+		// speed. Values 8-63 / 65-127 are undefined, and >=128 sets the BIOS-control
+		// bit (silently handing the fan back to the BIOS while the UI still says
+		// "Manual"). Reject anything else rather than write a raw arbitrary byte to
+		// the EC, and snap the box back to the last applied level so it stays honest.
+		int lvl = atoi(manlevel);
+		bool valid = isdigit((unsigned char)manlevel[0]) &&
+		             ((lvl >= 0 && lvl <= 7) || lvl == 64);
+		if (!this->m_failsafeTripped && valid) {
+			if (this->State.FanCtrl != lvl)
+				ok = this->SetFan("Manual", lvl);
 			else
 				ok = true;
 		}
+		else if (!valid && manlevel[0] != '\0') {
+			char snap[16];
+			_itoa_s(this->State.FanCtrl & 0x7f, snap, 10);   // mask off the BIOS bit for display
+			::SetDlgItemText(this->hwndDialog, 8310, snap);
+		}
 
 		break;
+	}
 	}
 
 	this->PreviousMode = this->CurrentMode;
 
 	// apply the fail-safe override (full speed) once per cycle while tripped
-	if (this->m_failsafeTripped && this->State.FanCtrl != 0x40)
-		ok = this->SetFan("Fail-safe: max temp reached, forcing full fan speed", 0x40);
+	if (this->m_failsafeTripped && this->State.FanCtrl != FAN_CTRL_FULL) {
+		ok = this->SetFan("Fail-safe: max temp reached, forcing full fan speed", FAN_CTRL_FULL);
+		// one-shot note (SetFan logs FAILED!! per attempt): if this EC does not
+		// echo 0x40 back, the override re-fires every poll until the trip clears
+		if (!ok && !this->m_failsafeWriteWarned) {
+			this->Trace("Fail-safe: EC did not accept full speed (0x40); retrying every cycle");
+			this->m_failsafeWriteWarned = true;
+		}
+	}
 
-	if (this->CurrentMode == 3 && this->MaxTemp > this->ManModeExitInternal)
-		this->CurrentMode = 2;
+	// (Manual-mode auto-exit lives in the title timer, which calls ModeToDialog(2)
+	// so the radio buttons actually change. Setting CurrentMode here did nothing:
+	// CurrentModeFromDialog() overwrites it from the unchanged buttons next poll.)
 
 	return ok;
 }

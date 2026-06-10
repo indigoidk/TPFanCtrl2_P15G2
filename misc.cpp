@@ -967,7 +967,34 @@ FANCONTROL::ReadConfig(const char* configfile)
 	for (i = 0; i < 17; i++)
 		_strupr_s(this->gSensorNames[i], sizeof(this->gSensorNames[i]));
 
+	// precompute the ignore-list match data now that names are uppercased; both
+	// IgnoreSensors and the names are constant for the process lifetime, so
+	// HandleData no longer rebuilds this every poll.
+	this->BuildIgnoreCache();
+
 	return ok;
+}
+
+//-------------------------------------------------------------------------
+//  (re)build the cached ignore-list match data from IgnoreSensors + sensor
+//  names. IgnoreSensors is entered lower-case in the ini while names are stored
+//  upper-case, so both sides are uppercased to match case-insensitively. The
+//  result feeds the per-poll max-temp loop in HandleData (m_sensorIgnored).
+//-------------------------------------------------------------------------
+void
+FANCONTROL::BuildIgnoreCache() {
+	sprintf_s(this->m_ignoreListNorm, sizeof(this->m_ignoreListNorm), "|%s|", this->IgnoreSensors);
+	for (int j = 0; this->m_ignoreListNorm[j] != '\0'; j++)
+		if (this->m_ignoreListNorm[j] == ',')
+			this->m_ignoreListNorm[j] = '|';
+	_strupr_s(this->m_ignoreListNorm, sizeof(this->m_ignoreListNorm));
+
+	for (int j = 0; j < 12; j++) {
+		char what[16];
+		// match against gSensorNames (always uppercase, never the "n/a" placeholder)
+		sprintf_s(what, sizeof(what), "|%s|", this->gSensorNames[j]);
+		this->m_sensorIgnored[j] = (strstr(this->m_ignoreListNorm, what) != 0);
+	}
 }
 
 //-------------------------------------------------------------------------
@@ -1057,6 +1084,25 @@ FANCONTROL::Trace(const char* text) {
 	else
 		strcpy_s(line, sizeof(line), "\r\n");
 
+	// write logfile first, independent of whether the on-screen panel is shown
+	if (this->Log2File == 1) {
+		FILE* flog;
+		errno_t errflog = fopen_s(&flog, "TPFanControl.log", "ab");
+		if (!errflog) {
+			//TODO: fwrite_s
+			fwrite(line, strlen(line), 1, flog);
+			fclose(flog);
+		}
+	}
+
+	// The Log panel (9200) defaults hidden and is the only reader of its own text.
+	// When it isn't visible there is no buffer to maintain, so skip the costly
+	// read-back + full-buffer newline rescan + whole-control rewrite below - this
+	// is the common case and the bulk of Trace()'s per-call cost.
+	HWND hLog = ::GetDlgItem(this->hwndDialog, 9200);
+	if (!hLog || !::IsWindowVisible(hLog))
+		return;
+
 	::GetDlgItemText(this->hwndDialog, 9200, trace, sizeof(trace) - strlen(line) - 1);
 
 	strcat_s(trace, sizeof(trace), line);
@@ -1073,17 +1119,6 @@ FANCONTROL::Trace(const char* text) {
 		}
 
 		p--;
-	}
-
-	// write logfile
-	if (this->Log2File == 1) {
-		FILE* flog;
-		errno_t errflog = fopen_s(&flog, "TPFanControl.log", "ab");
-		if (!errflog) {
-			//TODO: fwrite_s
-			fwrite(line, strlen(line), 1, flog);
-			fclose(flog);
-		}
 	}
 
 	// redisplay log and scroll to bottom

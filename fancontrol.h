@@ -33,6 +33,10 @@
 #define WM__NEWDATA WM_USER+7
 #define WM__TASKBAR WM_USER+8
 
+// EC fan-control register values (TP_ECOFFSET_FAN, reg 0x2F)
+#define FAN_CTRL_BIOS 0x80   // bit 7: EC/BIOS automatic control
+#define FAN_CTRL_FULL 0x40   // bit 6: full speed (the "64 = Max" value)
+
 #define setzero(adr, size) memset((void*)(adr), (char)0x00, (size))
 #define ARRAYMAX(tab) (sizeof(tab)/sizeof((tab)[0]))
 #define NULLSTRUCT    { 0, }
@@ -149,6 +153,7 @@ protected:
 	int ManModeExitInternal;
 	int FailsafeTemp = 0;          // thermal fail-safe threshold in Celsius (0 = off)
 	bool m_failsafeTripped = false;   // true while the fail-safe is holding the fan at max
+	bool m_failsafeWriteWarned = false; // one-shot trace fired: EC rejected the fail-safe write this trip
 	bool m_maxWarned = false;         // slider already prompted for max this visit (avoids re-prompt on repeat WM_HSCROLL)
 	int ShowBiasedTemps;
 	int SecStartDelay;
@@ -187,7 +192,7 @@ protected:
 	BOOL m_layoutInit;   // base geometry captured yet?
 	int  m_baseCW, m_baseCH;   // design-time client size
 	int  m_minW, m_minH;       // minimum window size (= design size)
-	RECT m_baseRC[17];   // design-time control rects (client coords)
+	RECT m_baseRC[18];   // design-time control rects (client coords)
 	void ReflowLayout();       // re-anchor controls on WM_SIZE
 	// PerMonitorV2 DPI state
 	UINT m_curDpi;       // current window DPI (96 = 100%)
@@ -201,6 +206,12 @@ protected:
 	int m_tempHistHead;        // index of next write (ring buffer)
 	void PushTempSample(int temp);          // record one MaxTemp reading
 	void DrawSparkline(HDC hdc, const RECT& rc);   // paint the history graph
+	// reusable back-buffer for DrawSparkline: recreated only when the control
+	// size changes, so a click-drag resize no longer reallocates a DC+bitmap
+	// every WM_PAINT. Freed in the destructor.
+	HDC     m_sparkDC = NULL;
+	HBITMAP m_sparkBmp = NULL;
+	int     m_sparkW = 0, m_sparkH = 0;
 	void ApplyTheme();   // (re)build theme brushes + dark titlebar + repaint
 	void InitThemeAndChrome();   // post-create: tab stops, menu checks, slider, theme
 	void ApplyLogVisibility();   // show/hide Log + shrink/restore window width
@@ -226,6 +237,23 @@ protected:
 	void CurveGridToBuf(HWND hwnd, int profile);   // edit boxes -> m_ceBuf
 	bool CurveApplyAndSave();                  // validate m_ceBuf -> SmartLevels{1,2}, re-activate, persist
 	void SaveCurves(const char* filename);     // rewrite Level=/Level2= ini lines from SmartLevels{1,2}
+
+	// Cached IgnoreSensors data, normalized once at config load instead of every
+	// poll: m_ignoreListNorm is the pipe-delimited, uppercased ignore list, and
+	// m_sensorIgnored[i] is precomputed membership for each sensor name. Sized to
+	// hold the full IgnoreSensors[256] plus the wrapping '|' delimiters.
+	char m_ignoreListNorm[260] = "";
+	bool m_sensorIgnored[12] = { false };
+	void BuildIgnoreCache();   // (re)compute the two caches above from IgnoreSensors + sensor names
+
+	// last text pushed to each per-poll readout control, so HandleData can skip a
+	// redundant SetDlgItemText (and its WM_SETTEXT repaint) when nothing changed.
+	char m_lastState[128] = "", m_lastFan1[32] = "", m_lastFan2[32] = "";
+	char m_lastMaxT[32] = "", m_lastStatus[256] = "", m_lastTpf[40] = "";
+
+	// the max-fan ("64") confirmation prompt, shared by the slider and the typed
+	// edit-box path so the warning can't be bypassed by typing the value.
+	bool ConfirmMaxFan();
 
 	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
 	char m_tempListSig[2048] = "";   // cache: skip RichEdit rebuild when nothing visible changed

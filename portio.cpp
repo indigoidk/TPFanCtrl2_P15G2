@@ -129,6 +129,16 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 bool
 FANCONTROL::WriteByteToEC(int offset, char NewData) {
 
+	// A SetFan() begins with EC writes, so a write can be the very first EC access
+	// (e.g. a hotkey/menu action racing the first poll). EC_CTRL/EC_DATA start at 0,
+	// and are otherwise only initialized inside ReadByteFromEC; initialize them here
+	// too, so we never drive WaitForFlags/WritePort against port 0.
+	if (this->EC_CTRL == 0) {
+		this->EC_CTRL = ACPI_EC_TYPE1_CTRLPORT;
+		this->EC_DATA = ACPI_EC_TYPE1_DATAPORT;
+		this->Trace("Using ACPI_EC_TYPE1");
+	}
+
 	// wait for IBF and OBF to clear
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF | ACPI_EC_FLAG_OBF)) {
 		this->Trace("writeec: timed out #1");

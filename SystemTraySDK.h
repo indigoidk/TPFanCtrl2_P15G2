@@ -165,6 +165,7 @@ protected:
 // Implementation
 protected:
     NOTIFYICONDATA  m_tnd;
+    TCHAR           m_lastTip[256];     // last tooltip set, to skip redundant NIM_MODIFY IPC
     HINSTANCE       m_hInstance;
     HWND            m_hWnd;
 	HWND            m_hTargetWnd;       // Window that menu commands are sent

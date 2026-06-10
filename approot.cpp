@@ -7,6 +7,13 @@ int APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR aArgs, int) {
     hInstRes = instance;
     hInstApp = instance;
 
+    // Harden runtime DLL loads (e.g. LoadLibraryA("riched20.dll")) against
+    // planting: search only System32 by name, never the (possibly user-writable)
+    // application directory. NOTE: this does NOT cover the load-time TVicPort.dll
+    // import, which the loader resolves before WinMain runs - that one is addressed
+    // by installing to a protected directory / code-signing, not by this call.
+    ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+
 	HANDLE hLock = CreateMutex(NULL,FALSE,"TPFanControlMutex01");
 
   if (hLock == NULL) {
