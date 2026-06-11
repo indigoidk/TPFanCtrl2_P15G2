@@ -21,6 +21,19 @@
 
 
 //-------------------------------------------------------------------------
+//  single home for temperature formatting, Win11 style "47\xb0C" (no spaces).
+//  Values must already be in the display unit - several callers (e.g. the
+//  Smart-curve dump) hold Fahrenheit numbers before the global conversion.
+//-------------------------------------------------------------------------
+void FmtTemp(char* out, size_t n, int dispTemp, int fahrenheitUnit) {
+	sprintf_s(out, n, "%d\xb0%s", dispTemp, fahrenheitUnit ? "F" : "C");
+}
+
+const char* TempUnit(int fahrenheitUnit) {
+	return fahrenheitUnit ? "\xb0" "F" : "\xb0" "C";
+}
+
+//-------------------------------------------------------------------------
 //  write selected options back to the ini, preserving comments and order
 //-------------------------------------------------------------------------
 void
@@ -30,10 +43,11 @@ FANCONTROL::SaveConfig(const char* configfile)
 	KV items[] = {
 		{ "StartMinimized", this->StartMinimized },
 		{ "StayOnTop",      this->StayOnTop },
+		{ "ShowInTaskbar",  this->ShowInTaskbar },
 		{ "ShowTempIcon",   this->ShowTempIcon },
 		{ "ShowTempHex",    this->ShowTempHex },
 		{ "ShowLog",        this->ShowLog },
-		{ "DarkMode",       this->DarkMode },
+		{ "DarkMode",       this->DarkModeSetting },   // 0/1/2 (2 = follow system)
 		{ "NoBallons",      this->NoBallons },
 		{ "Log2File",       this->Log2File },
 		{ "Log2csv",        this->Log2csv },
@@ -582,6 +596,12 @@ FANCONTROL::ReadConfig(const char* configfile)
 				this->StayOnTop = atoi(buf + 10);
 				continue;
 			}
+
+			// opt-in taskbar button (Alt-Tab / Snap Layouts / overlay+progress)
+			if (_strnicmp(buf, "ShowInTaskbar=", 14) == 0) {
+				this->ShowInTaskbar = atoi(buf + 14);
+				continue;
+			}
 			
 			if (_strnicmp(buf, "Log2csv=", 8) == 0) {
 				this->Log2csv = atoi(buf + 8);
@@ -609,7 +629,11 @@ FANCONTROL::ReadConfig(const char* configfile)
 			}
 
 			if (_strnicmp(buf, "DarkMode=", 9) == 0) {
-				this->DarkMode = atoi(buf + 9);
+				// 0 = light, 2 = follow the system theme, any other nonzero =
+				// dark (preserves the old 0/1 meaning). The effective DarkMode
+				// is resolved in the constructor once parsing is done.
+				int v = atoi(buf + 9);
+				this->DarkModeSetting = (v == 2) ? 2 : (v ? 1 : 0);
 				continue;
 			}
 
@@ -723,13 +747,18 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"# Start minimized to the tray (0/1)\r\n"
 				"StartMinimized=0\r\n"
 				"\r\n"
+				"# Show a taskbar button too (Alt-Tab, Snap Layouts, severity badge\r\n"
+				"# + fan-level progress on the button). 0 = classic tray-only.\r\n"
+				"ShowInTaskbar=0\r\n"
+				"\r\n"
 				"# New-style temperature tray icon (0/1)\r\n"
 				"ShowTempIcon=1\r\n"
 				"\r\n"
 				"# GUI options (also toggleable via the in-window checkboxes)\r\n"
+				"# DarkMode: 0 = light, 1 = dark, 2 = follow the Windows app theme\r\n"
 				"ShowTempHex=0\r\n"
 				"ShowLog=1\r\n"
-				"DarkMode=0\r\n"
+				"DarkMode=2\r\n"
 				"ShowGraph=1\r\n"
 				"\r\n"
 				"# Switch back to BIOS after this many consecutive read errors\r\n"
@@ -818,7 +847,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 	if (Fahrenheit) {
 		strcpy_s(buf, sizeof(buf), "  ");
 		for (i = 0; this->SmartLevels[i].temp != -1; i++) {
-			sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d° F->", i > 0 ? ", " : "", this->SmartLevels[i].temp);
+			sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d\xb0" "F -> ", i > 0 ? ", " : "", this->SmartLevels[i].temp);
 			if (this->SmartLevels[i].fan != 0x80)
 				sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%d", this->SmartLevels[i].fan);
 			else
@@ -828,7 +857,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 	else {
 		strcpy_s(buf, sizeof(buf), "  Levels= ");
 		for (i = 0; this->SmartLevels[i].temp != -1; i++) {
-			sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d° C -> ", i > 0 ? ",  " : "", this->SmartLevels[i].temp);
+			sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d\xb0" "C -> ", i > 0 ? ",  " : "", this->SmartLevels[i].temp);
 			if (this->SmartLevels[i].fan != 0x80)
 				sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%d", this->SmartLevels[i].fan);
 			else
@@ -844,7 +873,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 		if (Fahrenheit) {
 			strcpy_s(buf, sizeof(buf), "  ");
 			for (i = 0; this->SmartLevels2[i].temp2 != -1; i++) {
-				sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d° F->", i > 0 ? ", " : "", this->SmartLevels2[i].temp2);
+				sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d\xb0" "F -> ", i > 0 ? ", " : "", this->SmartLevels2[i].temp2);
 				if (this->SmartLevels2[i].fan2 != 0x80)
 					sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%d", this->SmartLevels2[i].fan2);
 				else
@@ -854,7 +883,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 		else {
 			strcpy_s(buf, sizeof(buf), "  Levels2= ");
 			for (i = 0; this->SmartLevels2[i].temp2 != -1; i++) {
-				sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d° C -> ", i > 0 ? ",  " : "", this->SmartLevels2[i].temp2);
+				sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%d\xb0" "C -> ", i > 0 ? ",  " : "", this->SmartLevels2[i].temp2);
 				if (this->SmartLevels2[i].fan2 != 0x80)
 					sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), "%d", this->SmartLevels2[i].fan2);
 				else
@@ -865,7 +894,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 	}
 
 	if (Fahrenheit) {
-		sprintf_s(buf, sizeof(buf), "  SensorOffset1-12= %d %d %d %d %d %d %d %d %d %d %d %d ° F",
+		sprintf_s(buf, sizeof(buf), "  SensorOffset1-12= %d %d %d %d %d %d %d %d %d %d %d %d \xb0" "F",
 			this->SensorOffset[0].offs, this->SensorOffset[1].offs, this->SensorOffset[2].offs,
 			this->SensorOffset[3].offs, this->SensorOffset[4].offs, this->SensorOffset[5].offs,
 			this->SensorOffset[6].offs, this->SensorOffset[7].offs, this->SensorOffset[8].offs,
@@ -881,7 +910,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 		}
 	}
 	else {
-		sprintf_s(buf, sizeof(buf), "  SensorOffset1-12= %d %d %d %d %d %d %d %d %d %d %d %d ° C",
+		sprintf_s(buf, sizeof(buf), "  SensorOffset1-12= %d %d %d %d %d %d %d %d %d %d %d %d \xb0" "C",
 			this->SensorOffset[0].offs, this->SensorOffset[1].offs, this->SensorOffset[2].offs,
 			this->SensorOffset[3].offs, this->SensorOffset[4].offs, this->SensorOffset[5].offs,
 			this->SensorOffset[6].offs, this->SensorOffset[7].offs, this->SensorOffset[8].offs,
@@ -1073,9 +1102,7 @@ FANCONTROL::IsMinimized(void) const {
 //-------------------------------------------------------------------------
 void
 FANCONTROL::Trace(const char* text) {
-	// log control (9200) is capped at 4096 chars, so 8 KB is ample; keeps this
-	// constantly-called function's stack frame well under the /analyze threshold
-	char trace[8192] = "", datebuf[128] = "", line[512] = "";
+	char datebuf[128] = "", line[512] = "";
 
 	this->CurrentDateTimeLocalized(datebuf, sizeof(datebuf));
 
@@ -1084,7 +1111,7 @@ FANCONTROL::Trace(const char* text) {
 	else
 		strcpy_s(line, sizeof(line), "\r\n");
 
-	// write logfile first, independent of whether the on-screen panel is shown
+	// write logfile
 	if (this->Log2File == 1) {
 		FILE* flog;
 		errno_t errflog = fopen_s(&flog, "TPFanControl.log", "ab");
@@ -1095,36 +1122,93 @@ FANCONTROL::Trace(const char* text) {
 		}
 	}
 
-	// The Log panel (9200) defaults hidden and is the only reader of its own text.
-	// When it isn't visible there is no buffer to maintain, so skip the costly
-	// read-back + full-buffer newline rescan + whole-control rewrite below - this
-	// is the common case and the bulk of Trace()'s per-call cost.
+	// record into the in-memory tail (any thread). The control itself is only
+	// touched by FlushLogToControl on the UI thread: the panel starts collapsed
+	// (lines must survive until it opens), and a cross-thread SendMessage from
+	// the EC worker would deadlock against the UI thread's non-pumping
+	// WaitForSingleObject(hThread) exit paths until their timeout expires.
+	::EnterCriticalSection(&this->m_logLock);
+	strcpy_s(this->m_logBuf[this->m_logHead], sizeof(this->m_logBuf[0]), line);
+	this->m_logHead = (this->m_logHead + 1) % LOGBUF_LINES;
+	if (this->m_logCount < LOGBUF_LINES)
+		this->m_logCount++;
+	this->m_logTotal++;
+	::LeaveCriticalSection(&this->m_logLock);
+
+	// UI thread: surface it immediately; worker-thread lines reach the panel
+	// via the 500ms timer's FlushLogToControl call instead
+	if (this->hwndDialog &&
+			::GetCurrentThreadId() == ::GetWindowThreadProcessId(this->hwndDialog, NULL))
+		this->FlushLogToControl();
+}
+
+//-------------------------------------------------------------------------
+//  push pending log-tail lines into the (visible) log edit. Appends in place
+//  via EM_REPLACESEL - repaints only the new line, no flicker, no O(n) text
+//  shuffling - and rebuilds from the whole ring when the panel just opened
+//  or more lines arrived than the ring holds. UI thread only.
+//-------------------------------------------------------------------------
+void
+FANCONTROL::FlushLogToControl() {
 	HWND hLog = ::GetDlgItem(this->hwndDialog, 9200);
 	if (!hLog || !::IsWindowVisible(hLog))
 		return;
 
-	::GetDlgItemText(this->hwndDialog, 9200, trace, sizeof(trace) - strlen(line) - 1);
+	if (this->m_logTotal == this->m_logShown)   // fast path: nothing new
+		return;
 
-	strcat_s(trace, sizeof(trace), line);
+	long total, pending;
+	int  count, start;
+	::EnterCriticalSection(&this->m_logLock);
+	total = this->m_logTotal;
+	count = this->m_logCount;
+	pending = total - this->m_logShown;
+	bool rebuild = (pending >= (long)count);   // panel just opened / ring lapped
+	if (rebuild)
+		pending = count;
+	start = (this->m_logHead - (int)pending + LOGBUF_LINES) % LOGBUF_LINES;
+	::LeaveCriticalSection(&this->m_logLock);
 
-	// display 100 lines max
-	char* p = trace + strlen(trace);
-	int linecount = 0;
+	bool batch = rebuild || pending > 1;
+	if (batch)
+		::SendMessage(hLog, WM_SETREDRAW, FALSE, 0);
+	if (rebuild)
+		::SetWindowTextA(hLog, "");
 
-	while (p >= trace) {
-		if (*p == '\n') {
-			linecount++;
-			if (linecount > 100)
-				break;
-		}
-
-		p--;
+	for (long i = 0; i < pending; i++) {
+		char l[512];
+		::EnterCriticalSection(&this->m_logLock);
+		strcpy_s(l, sizeof(l), this->m_logBuf[(start + (int)i) % LOGBUF_LINES]);
+		::LeaveCriticalSection(&this->m_logLock);
+		int len = ::GetWindowTextLength(hLog);
+		::SendMessage(hLog, EM_SETSEL, len, len);
+		::SendMessage(hLog, EM_REPLACESEL, FALSE, (LPARAM)l);
 	}
 
-	// redisplay log and scroll to bottom
-	::SetDlgItemText(this->hwndDialog, 9200, p + 1);
-	::SendDlgItemMessage(this->hwndDialog, 9200, EM_SETSEL, strlen(trace) - 2, strlen(trace) - 2);
-	::SendDlgItemMessage(this->hwndDialog, 9200, EM_LINESCROLL, 0, 9999);
+	// keep at most 100 lines, deleting from the top only once the cap is hit
+	// (the trailing \r\n makes EM_GETLINECOUNT report one extra, empty line)
+	int lines = (int)::SendMessage(hLog, EM_GETLINECOUNT, 0, 0);
+	if (lines > LOGBUF_LINES + 1) {
+		int cut = (int)::SendMessage(hLog, EM_LINEINDEX, lines - (LOGBUF_LINES + 1), 0);
+		if (cut > 0) {
+			if (!batch) {
+				::SendMessage(hLog, WM_SETREDRAW, FALSE, 0);
+				batch = true;
+			}
+			::SendMessage(hLog, EM_SETSEL, 0, cut);
+			::SendMessage(hLog, EM_REPLACESEL, FALSE, (LPARAM)"");
+			int len = ::GetWindowTextLength(hLog);
+			::SendMessage(hLog, EM_SETSEL, len, len);
+		}
+	}
+
+	if (batch) {
+		::SendMessage(hLog, WM_SETREDRAW, TRUE, 0);
+		::InvalidateRect(hLog, NULL, FALSE);
+	}
+	::SendMessage(hLog, EM_SCROLLCARET, 0, 0);   // ES_AUTOVSCROLL keeps the tail in view
+
+	this->m_logShown = total;
 }
 
 void

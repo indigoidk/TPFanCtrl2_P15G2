@@ -139,22 +139,30 @@ TASKBARICON::~TASKBARICON() {
 
 BOOL
 TASKBARICON::Construct() {
-	NOTIFYICONDATAV5 nofv5 = NULLSTRUCT;
-	NOTIFYICONDATA& nof = nofv5.nof;
+	// at _WIN32_WINNT 0x0600 NOTIFYICONDATA is already the Vista-size struct,
+	// so the old oversized-NOTIFYICONDATAV5-cbSize trick is no longer needed
+	NOTIFYICONDATA nof = NULLSTRUCT;
 
 	this->osVersion = 0;
+	this->m_trayV4 = FALSE;
 
 	nof.cbSize = sizeof(nof);
 	nof.hWnd = this->Owner;
 	nof.uID = this->Id;
-	nof.uFlags = NIF_MESSAGE;
+	// NIF_SHOWTIP keeps the standard (rich multi-line) tooltip working once
+	// the icon runs the VERSION_4 protocol
+	nof.uFlags = NIF_MESSAGE | NIF_SHOWTIP;
 	nof.uCallbackMessage = WM__TASKBAR;
 
 	if (this->IconId) {
-		nof.hIcon = (HICON)
-			::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON,
+		// LoadIconMetric picks the best-fitting frame and scales cleanly on
+		// HiDPI taskbars; keep the classic LoadImage as the fallback
+		HICON h = NULL;
+		if (FAILED(::LoadIconMetric(hInstRes, MAKEINTRESOURCEW(this->IconId), LIM_SMALL, &h)) || !h)
+			h = (HICON)::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON,
 				::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-		nof.uFlags |= NIF_ICON;
+		nof.hIcon = h;
+		if (nof.hIcon) nof.uFlags |= NIF_ICON;
 	}
 
 	if (strlen(this->Tooltip)) {
@@ -162,16 +170,16 @@ TASKBARICON::Construct() {
 		nof.uFlags |= NIF_TIP;
 	}
 
-	//
-	// try a version 5 init (Shell_NotifyIcon has different behaviour from up win2000=version 5)
-	//
-	nof.cbSize = sizeof(nofv5);
 	this->UpAndRunning = ::Shell_NotifyIcon(NIM_ADD, &nof);
 
-	if (this->UpAndRunning)
+	if (this->UpAndRunning) {
 		this->osVersion = 5;
-	else
-		this->UpAndRunning = ::Shell_NotifyIcon(NIM_ADD, &nof);
+		// modern callback protocol: keyboard activation (NIN_KEYSELECT) and a
+		// WM_CONTEXTMENU anchored at the icon; when the shell refuses, the
+		// flag stays FALSE and the legacy mouse-message protocol is used
+		nof.uVersion = NOTIFYICON_VERSION_4;
+		this->m_trayV4 = ::Shell_NotifyIcon(NIM_SETVERSION, &nof) ? TRUE : FALSE;
+	}
 
 	if (nof.hIcon) {
 		::DestroyIcon(nof.hIcon);
@@ -234,10 +242,11 @@ TASKBARICON::SetIcon(int iconid) {
 	nof.cbSize = sizeof(nof);
 	nof.hWnd = this->Owner;
 	nof.uID = this->Id;
-	nof.uFlags = NIF_ICON;
-	nof.hIcon = (HICON)
-		::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON,
-			::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+	nof.uFlags = NIF_ICON | NIF_SHOWTIP;   // SHOWTIP must persist across NIM_MODIFY
+	if (FAILED(::LoadIconMetric(hInstRes, MAKEINTRESOURCEW(this->IconId), LIM_SMALL, &nof.hIcon)) || !nof.hIcon)
+		nof.hIcon = (HICON)
+			::LoadImage(hInstRes, MAKEINTRESOURCE(this->IconId), IMAGE_ICON,
+				::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
 
 	ok = ::Shell_NotifyIcon(NIM_MODIFY, &nof);
 
@@ -272,7 +281,7 @@ TASKBARICON::SetTooltip(const char* tooltip) {
 		nof.cbSize = sizeof(nof);
 		nof.hWnd = this->Owner;
 		nof.uID = this->Id;
-		nof.uFlags = NIF_TIP;
+		nof.uFlags = NIF_TIP | NIF_SHOWTIP;   // SHOWTIP must persist across NIM_MODIFY
 		lstrcpyn(nof.szTip, this->Tooltip, sizeof(nof.szTip) - 1);
 
 
@@ -298,13 +307,28 @@ TASKBARICON::SetBalloon(ULONG flags, const char* title, const char* text, int ti
 	nof.cbSize = sizeof(NOTIFYICONDATA);
 	nof.hWnd = this->Owner;
 	nof.uID = this->Id;
-	nof.uFlags = NIF_INFO;
+	nof.uFlags = NIF_INFO | NIF_SHOWTIP;
 	nof.dwInfoFlags = flags;
 	nof.uTimeout = timeout;
 	lstrcpyn(nof.szInfo, text, sizeof(nof.szInfo) - 1);
 	lstrcpyn(nof.szInfoTitle, title, sizeof(nof.szInfoTitle) - 1);
 
+	// brand the toast with the live severity icon at toast size instead of the
+	// generic blue (i); fall back to the caller's plain flags when the load
+	// fails. The quiet-time bit is free politeness on Win7+.
+	HICON hBig = NULL;
+	if (this->IconId &&
+			SUCCEEDED(::LoadIconMetric(hInstRes, MAKEINTRESOURCEW(this->IconId),
+				LIM_LARGE, &hBig)) && hBig) {
+		nof.hBalloonIcon = hBig;
+		nof.dwInfoFlags = (flags & ~NIIF_ICON_MASK) | NIIF_USER | NIIF_LARGE_ICON;
+	}
+	nof.dwInfoFlags |= NIIF_RESPECT_QUIET_TIME;
+
 	ok = Shell_NotifyIcon(NIM_MODIFY, &nof);
+
+	if (hBig)
+		::DestroyIcon(hBig);   // safe: the shell copies the balloon icon
 
 	if (!ok)
 		this->RebuildIfNecessary(TRUE);

@@ -120,6 +120,7 @@ void CSystemTray::Initialise() {
 
 	m_hTargetWnd = NULL;
 	m_uCreationFlags = 0;
+	m_bV4 = FALSE;
 
 #ifdef SYSTEMTRAY_USEW2K
 	OSVERSIONINFOEX os = { sizeof(os) };
@@ -198,7 +199,8 @@ BOOL CSystemTray::Create(
 	m_tnd.hWnd = (hParent) ? hParent : m_hWnd;
 	m_tnd.uID = uID;
 	m_tnd.hIcon = icon;
-	m_tnd.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+	// NIF_SHOWTIP keeps the standard tooltip once the v4 protocol is active
+	m_tnd.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
 	m_tnd.uCallbackMessage = uCallbackMessage;
 
 	strncpy_s(m_tnd.szTip, sizeof(m_tnd.szTip), szToolTip, m_nMaxTooltipLength);
@@ -260,6 +262,8 @@ BOOL CSystemTray::Create(
 			Sleep(100);
 		}
 		m_bShowIconPending = m_bHidden = m_bRemoved = !bResult;
+		if (bResult)
+			SendTrayVersion();
 	}
 
 #ifdef SYSTEMTRAY_USEW2K
@@ -301,13 +305,25 @@ BOOL CSystemTray::AddIcon() {
 		RemoveIcon();
 
 	if (m_bEnabled) {
-		m_tnd.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+		m_tnd.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
 		if (!Shell_NotifyIcon(NIM_ADD, &m_tnd))
 			m_bShowIconPending = TRUE;
-		else
+		else {
 			m_bRemoved = m_bHidden = FALSE;
+			SendTrayVersion();
+		}
 	}
 	return (m_bRemoved == FALSE);
+}
+
+//-------------------------------------------------------------------------
+//  negotiate the modern (NOTIFYICON_VERSION_4) callback protocol after a
+//  successful NIM_ADD: keyboard activation + WM_CONTEXTMENU anchored at the
+//  icon. On failure m_bV4 stays FALSE and callers keep the legacy protocol.
+//-------------------------------------------------------------------------
+void CSystemTray::SendTrayVersion() {
+	m_tnd.uVersion = NOTIFYICON_VERSION_4;
+	m_bV4 = Shell_NotifyIcon(NIM_SETVERSION, &m_tnd) ? TRUE : FALSE;
 }
 
 BOOL CSystemTray::RemoveIcon() {
@@ -371,7 +387,7 @@ BOOL CSystemTray::SetIcon(HICON hIcon) {
 	if (!m_bEnabled)
 		return FALSE;
 
-	m_tnd.uFlags = NIF_ICON;
+	m_tnd.uFlags = NIF_ICON | NIF_SHOWTIP;   // SHOWTIP must persist across NIM_MODIFY
 	m_tnd.hIcon = hIcon;
 
 	if (m_bHidden)
@@ -518,7 +534,7 @@ BOOL CSystemTray::SetTooltipText(LPCTSTR pszTip) {
 		return TRUE;
 	_tcsncpy_s(m_lastTip, _countof(m_lastTip), pszTip, _TRUNCATE);
 
-	m_tnd.uFlags = NIF_TIP;
+	m_tnd.uFlags = NIF_TIP | NIF_SHOWTIP;   // SHOWTIP must persist across NIM_MODIFY
 	_tcsncpy_s(m_tnd.szTip, sizeof(m_tnd.szTip), pszTip, m_nMaxTooltipLength - 1);
 
 	if (m_bHidden)
@@ -583,7 +599,8 @@ LPTSTR CSystemTray::GetTooltipText() const {
 BOOL CSystemTray::ShowBalloon(LPCTSTR szText,
 	LPCTSTR szTitle  /*=NULL*/,
 	DWORD dwIcon   /*=NIIF_NONE*/,
-	UINT uTimeout /*=10*/) {
+	UINT uTimeout /*=10*/,
+	HICON hUserIcon /*=NULL*/) {
 #ifndef SYSTEMTRAY_USEW2K
 	return FALSE;
 #else
@@ -604,28 +621,36 @@ BOOL CSystemTray::ShowBalloon(LPCTSTR szText,
 		ASSERT(lstrlen(szTitle) < 64);
 	}
 
-	// dwBalloonIcon must be valid.
-	ASSERT(NIIF_NONE == dwIcon || NIIF_INFO == dwIcon ||
-		NIIF_WARNING == dwIcon || NIIF_ERROR == dwIcon);
+	// the icon selector must be a valid NIIF_* value (modifier bits aside)
+	ASSERT((dwIcon & NIIF_ICON_MASK) <= NIIF_USER);
 
 	// The timeout must be between 10 and 30 seconds.
 	ASSERT(uTimeout >= 10 && uTimeout <= 30);
 
 
-	m_tnd.uFlags = NIF_INFO;
+	m_tnd.uFlags = NIF_INFO | NIF_SHOWTIP;
 	_tcsncpy_s(m_tnd.szInfo, sizeof(m_tnd.szInfo), szText, 256);
 	if (szTitle)
 		_tcsncpy_s(m_tnd.szInfoTitle, sizeof(m_tnd.szInfoTitle), szTitle, 64);
 	else
 		m_tnd.szInfoTitle[0] = _T('\0');
-	m_tnd.dwInfoFlags = dwIcon;
+	m_tnd.dwInfoFlags = dwIcon | NIIF_RESPECT_QUIET_TIME;
+	if (hUserIcon) {
+		// brand the toast with the caller's icon at full size instead of the
+		// stock glyph; ownership stays with the caller (the shell copies it)
+		m_tnd.hBalloonIcon = hUserIcon;
+		m_tnd.dwInfoFlags = (m_tnd.dwInfoFlags & ~NIIF_ICON_MASK)
+			| NIIF_USER | NIIF_LARGE_ICON;
+	}
 	m_tnd.uTimeout = uTimeout * 1000;   // convert time to ms
 
 	BOOL bSuccess = Shell_NotifyIcon(NIM_MODIFY, &m_tnd);
 
 	// Zero out the balloon text string so that later operations won't redisplay
-	// the balloon.
+	// the balloon, and drop the borrowed icon handle so the persistent m_tnd
+	// never holds a stale HICON.
 	m_tnd.szInfo[0] = _T('\0');
+	m_tnd.hBalloonIcon = NULL;
 
 	return bSuccess;
 #endif
@@ -953,6 +978,8 @@ void CSystemTray::InstallIconPending() {
 
 	// Try and recreate the icon
 	m_bHidden = !Shell_NotifyIcon(NIM_ADD, &m_tnd);
+	if (!m_bHidden)
+		SendTrayVersion();   // a re-added icon starts back at the legacy protocol
 
 	// If it's STILL hidden, then have another go next time...
 	m_bShowIconPending = !m_bHidden;

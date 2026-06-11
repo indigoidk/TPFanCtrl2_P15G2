@@ -45,6 +45,26 @@ typedef vector<HICON> ICONVECTOR;
 #define NIIF_NONE 0
 #endif
 
+// Vista+/Win7 NotifyIcon bits the 0x0600-targeted SDK headers may lack
+#ifndef NIF_SHOWTIP
+#define NIF_SHOWTIP              0x00000080
+#endif
+#ifndef NOTIFYICON_VERSION_4
+#define NOTIFYICON_VERSION_4     4
+#endif
+#ifndef NIIF_USER
+#define NIIF_USER                0x00000004
+#endif
+#ifndef NIIF_LARGE_ICON
+#define NIIF_LARGE_ICON          0x00000020
+#endif
+#ifndef NIIF_RESPECT_QUIET_TIME
+#define NIIF_RESPECT_QUIET_TIME  0x00000080
+#endif
+#ifndef NIIF_ICON_MASK
+#define NIIF_ICON_MASK           0x0000000F
+#endif
+
 class CSystemTray
 {
 // Construction/destruction
@@ -106,8 +126,14 @@ public:
     BOOL  RemoveIcon();
     BOOL  MoveToRight();
 
+    // hUserIcon: optional custom toast icon (NIIF_USER|NIIF_LARGE_ICON applied
+    // when set); the caller keeps ownership - the shell copies the image
     BOOL ShowBalloon(LPCTSTR szText, LPCTSTR szTitle = NULL,
-                     DWORD dwIcon = NIIF_NONE, UINT uTimeout = 10);
+                     DWORD dwIcon = NIIF_NONE, UINT uTimeout = 10,
+                     HICON hUserIcon = NULL);
+
+    // NOTIFYICON_VERSION_4 negotiated (modern callback protocol)?
+    BOOL IsV4() const { return m_bV4; }
 
     // For icon animation
     BOOL  SetIconList(UINT uFirstIconID, UINT uLastIconID); 
@@ -185,6 +211,8 @@ protected:
     UINT			m_DefaultMenuItemID;
     BOOL			m_DefaultMenuItemByPos;
 	UINT			m_uCreationFlags;
+	BOOL			m_bV4;              // NIM_SETVERSION(NOTIFYICON_VERSION_4) accepted
+	void			SendTrayVersion();  // negotiate v4; call after every successful NIM_ADD
 
 // Static data
 protected:

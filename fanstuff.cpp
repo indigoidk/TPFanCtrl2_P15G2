@@ -123,15 +123,33 @@ FANCONTROL::HandleData(void) {
 		if (hSpark) ::InvalidateRect(hSpark, NULL, FALSE);
 	}
 
+	// Read the mode once for this poll. The radio state can't change mid-function
+	// (single-threaded UI, no message pump here), so this->CurrentMode is reused for
+	// the title/tooltip text and the per-mode switch below instead of re-querying
+	// the buttons ~5x via CurrentModeFromDialog().
+	this->CurrentModeFromDialog();
+
+	// The cheap readout fields (8100/8102/8103/8104/8112/8115) are maintained
+	// even while hidden - SetDlgTextIfChanged's dedupe makes that a strcmp per
+	// poll - so a restore from the tray always shows the last good readings
+	// instantly, even mid EC-error-streak (HandleData doesn't run again until
+	// a read succeeds). Only the expensive RichEdit rebuild (UpdateTempList)
+	// is gated on visibility; its caches are cleared on the hidden->visible
+	// transition so the first visible poll rebuilds the list.
+	bool uiVisible = ::IsWindowVisible(this->hwndDialog) != FALSE;
+	if (uiVisible && !this->m_uiVisible) {
+		this->m_tempListSig[0] = '\0';
+		this->m_tempListRows = -1;
+	}
+	this->m_uiVisible = uiVisible;
+
 	//
 	// update dialog elements
 	//
 
 	// title string (for minimized window)
-	if (Fahrenheit)
-		sprintf_s(title2, sizeof(title2), "%d° F", this->MaxTemp * 9 / 5 + 32);
-	else
-		sprintf_s(title2, sizeof(title2), "%d° C", this->MaxTemp);
+	FmtTemp(title2, sizeof(title2),
+		Fahrenheit ? this->MaxTemp * 9 / 5 + 32 : this->MaxTemp, Fahrenheit);
 
 	// display fan state
 	int fanctrl = this->State.FanCtrl;
@@ -147,7 +165,7 @@ FANCONTROL::HandleData(void) {
 		else {
 			if (!(SlimDialog && StayOnTop))
 				sprintf_s(obuf2 + strlen(obuf2), sizeof(obuf2) - strlen(obuf2), " Non Bios");
-			sprintf_s(title2 + strlen(title2), sizeof(title2) - strlen(title2), " Fan %d (%s)",	fanctrl & 0x3F,	this->CurrentModeFromDialog() == 2 ? "Smart" : "Fixed");
+			sprintf_s(title2 + strlen(title2), sizeof(title2) - strlen(title2), " Fan %d (%s)",	fanctrl & 0x3F,	this->CurrentMode == 2 ? "Smart" : "Fixed");
 		}
 	}
 	else {
@@ -158,7 +176,7 @@ FANCONTROL::HandleData(void) {
 		}
 		else {
 			sprintf_s(obuf2 + strlen(obuf2), sizeof(obuf2) - strlen(obuf2), "Fan Level %d, Non Bios)", fanctrl & 0x3F);
-			sprintf_s(title2 + strlen(title2), sizeof(title2) - strlen(title2), " Fan %d (%s)",	fanctrl & 0x3F,	this->CurrentModeFromDialog() == 2 ? "Smart" : "Fixed");
+			sprintf_s(title2 + strlen(title2), sizeof(title2) - strlen(title2), " Fan %d (%s)",	fanctrl & 0x3F,	this->CurrentMode == 2 ? "Smart" : "Fixed");
 		}
 	}
 
@@ -184,11 +202,12 @@ FANCONTROL::HandleData(void) {
 	// compose the richer multi-line tray tooltip (mode / max temp / fan / active
 	// profile, plus game + EC-error flags). Title2 stays the single-line title.
 	{
-		int dT = Fahrenheit ? (this->MaxTemp * 9 / 5 + 32) : this->MaxTemp;
-		const char* unit = Fahrenheit ? "F" : "C";
+		char dT[16];
+		FmtTemp(dT, sizeof(dT),
+			Fahrenheit ? (this->MaxTemp * 9 / 5 + 32) : this->MaxTemp, Fahrenheit);
 
 		char modeStr[40];
-		switch (this->CurrentModeFromDialog()) {
+		switch (this->CurrentMode) {
 		case 1:  strcpy_s(modeStr, sizeof(modeStr), "BIOS mode"); break;
 		case 3:  strcpy_s(modeStr, sizeof(modeStr), "Manual mode"); break;
 		case 2:
@@ -206,8 +225,8 @@ FANCONTROL::HandleData(void) {
 		else                             sprintf_s(fanStr, sizeof(fanStr), "%d", fanctrl & 0x7f);
 
 		sprintf_s(this->TrayTip, sizeof(this->TrayTip),
-			"%s\r\nMax %d\xb0%s   Fan %s   %d/%d rpm",
-			modeStr, dT, unit, fanStr, this->fan1speed, this->fan2speed);
+			"%s\r\nMax %s   Fan %s   %d/%d rpm",
+			modeStr, dT, fanStr, this->fan1speed, this->fan2speed);
 
 		char extra[64] = "";
 		if (this->m_failsafeTripped)
@@ -234,17 +253,15 @@ FANCONTROL::HandleData(void) {
 	SetDlgTextIfChanged(this->hwndDialog, 8104, obuf2, this->m_lastFan2, sizeof(this->m_lastFan2));
 
 	// display temperature list
-	if (Fahrenheit)
-		sprintf_s(obuf2, sizeof(obuf2), "%d° F", this->MaxTemp * 9 / 5 + 32);
-	else
-		sprintf_s(obuf2, sizeof(obuf2), "%d° C", this->MaxTemp);
-
+	FmtTemp(obuf2, sizeof(obuf2),
+		Fahrenheit ? this->MaxTemp * 9 / 5 + 32 : this->MaxTemp, Fahrenheit);
 	SetDlgTextIfChanged(this->hwndDialog, 8103, obuf2, this->m_lastMaxT, sizeof(this->m_lastMaxT));
 
-	this->UpdateTempList();
-
-	// keep the manual box/slider enabled state in sync with the current mode
-	this->UpdateManualControlsEnabled();
+	if (uiVisible) {
+		this->UpdateTempList();
+		// keep the manual box/slider enabled state in sync with the current mode
+		this->UpdateManualControlsEnabled(this->CurrentMode);
+	}
 
 	this->icontemp = this->BiasedTemp(this->State.Sensors[iMaxTemp], iMaxTemp);
 
@@ -268,17 +285,22 @@ FANCONTROL::HandleData(void) {
 	if (templist[0])
 		templist[strlen(templist) - 1] = '\0';   // drop trailing separator (guard empty)
 
-	if (Fahrenheit)
-		sprintf_s(CurrentStatus, sizeof(CurrentStatus), "Fan: 0x%02x / Switch: %d° F (%s)", State.FanCtrl, MaxTemp * 9 / 5 + 32, templist);
-	else
-		sprintf_s(CurrentStatus, sizeof(CurrentStatus), "Fan: 0x%02x / Switch: %d° C (%s)", State.FanCtrl, MaxTemp,	templist);
+	{
+		char tb[16];
+		FmtTemp(tb, sizeof(tb), Fahrenheit ? MaxTemp * 9 / 5 + 32 : MaxTemp, Fahrenheit);
+		sprintf_s(CurrentStatus, sizeof(CurrentStatus), "Fan: 0x%02x / Switch: %s (%s)",
+			State.FanCtrl, tb, templist);
+	}
 
 	// display fan speed
 
-	// fan1speed/fan2speed were already clamped to <= 0x1fff when decoded above
-	sprintf_s(obuf2, sizeof(obuf2), "%d/%d", this->fan1speed, this->fan2speed);
-
-	sprintf_s(CurrentStatuscsv, sizeof(CurrentStatuscsv), "%s %s; %d; %d; ", templist, obuf2, State.FanCtrl, MaxTemp);
+	// CurrentStatuscsv feeds only the CSV log (Tracecsv, gated on Log2csv == 1), so
+	// build it only when CSV logging is on; obuf2 is its scratch buffer here.
+	// (fan1speed/fan2speed were already clamped to <= 0x1fff when decoded above.)
+	if (this->Log2csv == 1) {
+		sprintf_s(obuf2, sizeof(obuf2), "%d/%d", this->fan1speed, this->fan2speed);
+		sprintf_s(CurrentStatuscsv, sizeof(CurrentStatuscsv), "%s %s; %d; %d; ", templist, obuf2, State.FanCtrl, MaxTemp);
+	}
 
 	SetDlgTextIfChanged(this->hwndDialog, 8112, this->CurrentStatus, this->m_lastStatus, sizeof(this->m_lastStatus));
 
@@ -286,8 +308,7 @@ FANCONTROL::HandleData(void) {
 	// handle fan control according to mode
 	//
 
-	this->CurrentModeFromDialog();
-	this->ShowAllFromDialog();
+	this->ShowAllFromDialog();   // mode already read once at the top of this poll
 
 	SetDlgTextIfChanged(this->hwndDialog, 8115,
 		(this->CurrentMode == 2 || this->CurrentMode == 3) ? "TPControlFAN = On" : "TPControlFAN = OFF",

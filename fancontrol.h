@@ -32,6 +32,9 @@
 #define WM__GETDATA WM_USER+6
 #define WM__NEWDATA WM_USER+7
 #define WM__TASKBAR WM_USER+8
+// modal-dialog re-theme, posted (not handled inline) from WM_SETTINGCHANGE so
+// it runs after the main window's ApplyTheme rebuilt the shared brushes
+#define WM__RETHEMEDLG (WM_APP + 40)
 
 // EC fan-control register values (TP_ECOFFSET_FAN, reg 0x2F)
 #define FAN_CTRL_BIOS 0x80   // bit 7: EC/BIOS automatic control
@@ -40,6 +43,11 @@
 #define setzero(adr, size) memset((void*)(adr), (char)0x00, (size))
 #define ARRAYMAX(tab) (sizeof(tab)/sizeof((tab)[0]))
 #define NULLSTRUCT    { 0, }
+
+// single temperature formatter, Win11 style "47\xb0C" (defined in misc.cpp).
+// The value must already be in the display unit; the flag picks the suffix.
+void FmtTemp(char* out, size_t n, int dispTemp, int fahrenheitUnit);
+const char* TempUnit(int fahrenheitUnit);   // "\xb0C" / "\xb0F"
 
 class FANCONTROL {
 protected:
@@ -155,17 +163,20 @@ protected:
 	bool m_failsafeTripped = false;   // true while the fail-safe is holding the fan at max
 	bool m_failsafeWriteWarned = false; // one-shot trace fired: EC rejected the fail-safe write this trip
 	bool m_maxWarned = false;         // slider already prompted for max this visit (avoids re-prompt on repeat WM_HSCROLL)
+	bool m_manualFieldInvalid = false; // manual box (8310) currently holds a non-EC level (8-63, 65+); tints the text red
 	int ShowBiasedTemps;
 	int SecStartDelay;
 	char gSensorNames[17][4];
 	int Log2File;
 	int Log2csv;
 	int StayOnTop;
+	int ShowInTaskbar;   // opt-in taskbar button (Alt-Tab / Snap Layouts / ITaskbarList3)
 	int ShowAll;
 	int ShowTempIcon;
 	int ShowTempHex;   // show (0x..) EC address column in temp list
 	int ShowLog;       // show the Log box
-	int DarkMode;      // dark theme
+	int DarkMode;      // effective dark theme in force right now (0/1)
+	int DarkModeSetting; // persisted choice: 0=light, 1=dark, 2=follow system
 	int ShowGraph;     // show the temperature history sparkline (control 8120)
 	// last main-window position/size (restored rect), persisted across runs via the
 	// WindowPos= ini line. WinW <= 0 means "not saved yet" -> let the OS place it.
@@ -182,7 +193,16 @@ protected:
 
 	HBRUSH m_hbrDlg;     // modern flat dialog/static background
 	HBRUSH m_hbrField;   // editable field background
+	HBRUSH m_hbrRule;    // hairline divider statics (9240-9242)
 	COLORREF m_clrText;  // current theme text color
+	COLORREF m_clrTextDim; // secondary tier: quiet field labels and hints
+	COLORREF m_clrAccent; // Windows accent color for non-semantic emphasis
+	BOOL m_highContrast; // OS High Contrast active (system colors override ours)
+	// severity color for a Celsius temp (same ladder as the tray icon); plain
+	// text color under High Contrast. Single home for the 4x-duplicated palette.
+	COLORREF SeverityColor(int tempC) const;
+	HICON m_hIconSm = NULL;  // title-bar/system-menu icon (WM_SETICON doesn't copy,
+	HICON m_hIconBig = NULL; // so the handles live until the destructor)
 	HFONT  m_hFontHdr;   // bold section-header font (replaces group-box frames)
 	HFONT  m_hFontBig;   // semibold font for the State / Fan readouts
 	HFONT  m_hFontTitle; // larger semibold font for the "TPFanControl = ..." line
@@ -192,7 +212,7 @@ protected:
 	BOOL m_layoutInit;   // base geometry captured yet?
 	int  m_baseCW, m_baseCH;   // design-time client size
 	int  m_minW, m_minH;       // minimum window size (= design size)
-	RECT m_baseRC[18];   // design-time control rects (client coords)
+	RECT m_baseRC[20];   // design-time control rects (client coords)
 	void ReflowLayout();       // re-anchor controls on WM_SIZE
 	// PerMonitorV2 DPI state
 	UINT m_curDpi;       // current window DPI (96 = 100%)
@@ -212,14 +232,36 @@ protected:
 	HDC     m_sparkDC = NULL;
 	HBITMAP m_sparkBmp = NULL;
 	int     m_sparkW = 0, m_sparkH = 0;
+	// sparkline hover inspection (control 8120 is subclassed; see
+	// SparkSubclassProc). m_sparkHoverX stores the cursor x in control
+	// coordinates so DrawSparkline re-derives the sample each paint and the
+	// marker doesn't drift as the ring buffer scrolls under a still cursor.
+	int  m_sparkHoverX = -1;        // -1 = not hovering
+	bool m_sparkTipAdded = false;   // tracking tool registered on m_hwndTip
+	bool m_sparkTracking = false;   // TrackMouseEvent(TME_LEAVE) armed
+	char m_sparkTipText[64] = "";   // backing store for the tracking tip text
+	static LRESULT CALLBACK SparkSubclassProc(HWND hwnd, UINT msg, WPARAM wp,
+		LPARAM lp, UINT_PTR id, DWORD_PTR ref);
+	void SparkHoverTip(HWND hSpark, int x, int y, bool show);
 	void ApplyTheme();   // (re)build theme brushes + dark titlebar + repaint
 	void InitThemeAndChrome();   // post-create: tab stops, menu checks, slider, theme
+	void ShowMainWindow(bool show);   // fade-aware show/hide for the tray toggles
+	// build + pop the tray context menu; anchor = icon point under the v4
+	// protocol (WM_CONTEXTMENU), NULL = at the cursor (legacy WM_RBUTTONDOWN)
+	void ShowTrayMenu(const POINT* anchor = NULL);
+
+	// opt-in (ShowInTaskbar=1) taskbar button extras: severity overlay badge +
+	// fan-level progress fill via ITaskbarList3 (inbox COM, failure-tolerant)
+	struct ITaskbarList3* m_pTaskbar3 = nullptr;
+	bool m_comInit = false;       // CoInitializeEx succeeded (balanced in dtor)
+	int  m_lastTbSig = -1;        // (overlay|state|progress) dedupe signature
+	void UpdateTaskbarIndicators();   // per-poll overlay/progress refresh
 	void ApplyLogVisibility();   // show/hide Log + shrink/restore window width
 	void UpdateTempList();   // repopulate RichEdit 8101 with per-sensor colors
 	void ToggleGameMode(bool silent = false);   // hide/restore TVic driver files; silent on exit/shutdown
 	void ShowSettingsDialog();   // modal in-app settings editor (writes TPFanControl.ini)
 	static INT_PTR CALLBACK SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
-	void ApplySettingsFromDialog(HWND hwnd);   // shared by OK and Apply in the Settings dialog
+	bool ApplySettingsFromDialog(HWND hwnd);   // shared by OK and Apply; false = a value was out of range
 
 	// ---- Smart fan-curve editor (dialog 9400) ----------------------------------
 	// In-app grid editor for the Level= / Level2= curves, so they no longer need
@@ -251,12 +293,30 @@ protected:
 	char m_lastState[128] = "", m_lastFan1[32] = "", m_lastFan2[32] = "";
 	char m_lastMaxT[32] = "", m_lastStatus[256] = "", m_lastTpf[40] = "";
 
+	// In-memory tail of recent log lines (ring, m_logLock-guarded; written from
+	// any thread). The log panel starts collapsed and worker-thread Trace can't
+	// touch the control directly (cross-thread SendMessage deadlocks the exit
+	// paths), so this buffer is the single source the visible control is filled
+	// from: FlushLogToControl appends the pending lines when the panel is open
+	// (called from Trace on the UI thread, the 500ms timer, ApplyLogVisibility).
+	static const int LOGBUF_LINES = 100;   // matches the control's 100-line cap
+	char m_logBuf[LOGBUF_LINES][512];
+	int  m_logHead = 0;     // next ring slot to write
+	int  m_logCount = 0;    // valid lines (saturates at LOGBUF_LINES)
+	long m_logTotal = 0;    // monotonic: lines ever recorded (under m_logLock)
+	long m_logShown = 0;    // monotonic: lines already in the control (UI thread)
+	CRITICAL_SECTION m_logLock;
+	void FlushLogToControl();   // UI thread only; no-op while the panel is hidden
+
 	// the max-fan ("64") confirmation prompt, shared by the slider and the typed
 	// edit-box path so the warning can't be bypassed by typing the value.
 	bool ConfirmMaxFan();
 
 	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
 	char m_tempListSig[2048] = "";   // cache: skip RichEdit rebuild when nothing visible changed
+	int  m_tempListRows = -1;        // last applied temp-list row count; skip the auto-size reflow unless it changes
+	int  m_lastManualEnabled = -1;   // last applied manual-controls enabled state (-1 = unknown, forces first apply)
+	bool m_uiVisible = false;        // last seen window-visible state, for the hidden->visible cache-clear in HandleData
 
 	char Title[128];
 	char Title2[128];
@@ -342,8 +402,10 @@ protected:
 	void CopyReadingsToClipboard();
 
 	// grey out the manual fan-level box + slider unless Manual mode is active, so
-	// disabled controls reflect what actually applies to the current mode
-	void UpdateManualControlsEnabled();
+	// disabled controls reflect what actually applies to the current mode.
+	// mode < 0 reads the live radio state; callers that already know the mode
+	// (HandleData, ModeToDialog) pass it to skip the redundant BM_GETCHECK reads.
+	void UpdateManualControlsEnabled(int mode = -1);
 
 	// for detecting lid closing
 	HPOWERNOTIFY hPowerNotify;

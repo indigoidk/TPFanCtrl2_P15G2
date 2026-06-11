@@ -7,19 +7,17 @@ class CDynamicIcon {
 public:
 
 	// iconSize: target square size in pixels; 0 = auto (SM_CXSMICON at current DPI)
-	CDynamicIcon(const char line1[3], const char line2[3], const int iFarbeIconA, const int iFontIconA, int iconSize = 0);
+	// lightTaskbar: SystemUsesLightTheme is on, so the neutral badge inverts
+	CDynamicIcon(const char line1[3], const char line2[3], const int iFarbeIconA, const int iFontIconA, int iconSize = 0, bool lightTaskbar = false);
 	~CDynamicIcon();
 
 	HICON GetHIcon();
 private:
 
 	HDC      memDC1_;
-	HDC      memDC2_;
 	HBITMAP  oldBmp_1;
-	HBITMAP  oldBmp_2;
-	HBITMAP  iconBmp_;
-	HBITMAP  iconMaskBmp_;
-	HBRUSH   hOldBrush;
+	HBITMAP  iconBmp_;     // 32bpp DIB section (per-pixel alpha badge)
+	HBITMAP  iconMaskBmp_; // region-shaped 1bpp AND mask for non-alpha renderers
 	HRGN     rgn;
 	HICON    icon_;
 	int iconWidth_;    // DPI-scaled icon size (was fixed 16x16)

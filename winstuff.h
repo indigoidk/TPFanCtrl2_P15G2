@@ -35,6 +35,29 @@
 #define NIIF_NOSOUND    0x00000010
 #endif
 
+// Vista+/Win7 NotifyIcon bits the 0x0600-targeted SDK headers may lack
+// (#ifndef-guarded: NIIF_USER/NIF_SHOWTIP etc. exist in newer SDKs)
+#ifndef NIIF_USER
+#define NIIF_USER                0x00000004
+#endif
+#ifndef NIIF_LARGE_ICON
+#define NIIF_LARGE_ICON          0x00000020
+#endif
+#ifndef NIIF_RESPECT_QUIET_TIME
+#define NIIF_RESPECT_QUIET_TIME  0x00000080
+#endif
+#ifndef NIF_SHOWTIP
+#define NIF_SHOWTIP              0x00000080
+#endif
+#ifndef NOTIFYICON_VERSION_4
+#define NOTIFYICON_VERSION_4     4
+#endif
+#ifndef NIN_SELECT
+#define NIN_SELECT               (WM_USER + 0)
+#define NINF_KEY                 0x1
+#define NIN_KEYSELECT            (NIN_SELECT | NINF_KEY)
+#endif
+
 
 //-------------------------------------------------------------------------
 //
@@ -78,6 +101,10 @@ protected:
 
 
 public:
+	// TRUE when the shell accepted NOTIFYICON_VERSION_4 (modern callback
+	// protocol); DlgProc gates the legacy mouse-message cases on this
+	BOOL m_trayV4 = FALSE;
+
 	TASKBARICON(HWND hwndowner, int id, const char* tooltip);
 
 	~TASKBARICON(void);
