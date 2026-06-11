@@ -3055,6 +3055,19 @@ FANCONTROL::DlgProc(HWND
 
 			switch (cd->dwDrawStage) {
 			case CDDS_PREPAINT:
+				// the control invalidates only the thumb area when the
+				// position changes, but the channel's accent fill is split AT
+				// the thumb - a partial clip leaves stale fill behind on
+				// jump-clicks (e.g. 6 -> 7). Force one full repaint per
+				// position change; the cached position keeps this from
+				// looping (the forced paint sees an unchanged value).
+				{
+					int pos = (int)::SendMessage(cd->hdr.hwndFrom, TBM_GETPOS, 0, 0);
+					if (pos != this->m_lastSliderPos) {
+						this->m_lastSliderPos = pos;
+						::InvalidateRect(cd->hdr.hwndFrom, NULL, TRUE);
+					}
+				}
 				cdrf = CDRF_NOTIFYITEMDRAW;
 				break;
 

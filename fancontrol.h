@@ -172,6 +172,7 @@ protected:
 	bool m_critFired = false;      // fired; re-arms after cooling 5 C below
 	bool m_failsafeWriteWarned = false; // one-shot trace fired: EC rejected the fail-safe write this trip
 	bool m_maxWarned = false;         // slider already prompted for max this visit (avoids re-prompt on repeat WM_HSCROLL)
+	int m_lastSliderPos = -1;         // last thumb position the custom draw painted (full-repaint trigger)
 	bool m_maxConfirmSuppressed = false; // "don't ask again" ticked on the max-fan prompt (this run only)
 	bool m_manualFieldInvalid = false; // manual box (8310) currently holds a non-EC level (8-63, 65+); tints the text red
 	int ShowBiasedTemps;
