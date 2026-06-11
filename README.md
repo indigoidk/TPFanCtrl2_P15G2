@@ -3,7 +3,7 @@
 [![build](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml/badge.svg)](https://github.com/indigoidk/TPFanCtrl2_P15G2/actions/workflows/build.yml)
 [![latest release](https://img.shields.io/github/v/release/indigoidk/TPFanCtrl2_P15G2?label=download)](https://github.com/indigoidk/TPFanCtrl2_P15G2/releases/latest)
 
-![TPFanControl main window](https://raw.githubusercontent.com/indigoidk/TPFanCtrl2_P15G2/master/docs/screenshot.png)
+<img src="https://raw.githubusercontent.com/indigoidk/TPFanCtrl2_P15G2/master/docs/screenshot.png" alt="TPFanControl main window" width="560">
 
 A Windows fan-control utility for Lenovo ThinkPads. It reads the embedded
 controller (EC) for temperatures and fan speeds and lets you run the fan in
@@ -319,10 +319,37 @@ Stability and correctness pass (largely internal; no UI changes).
 ## License & credits
 
 The application source is released into the public domain (see
-[`LICENSE`](LICENSE)). It builds on the original **TPFanControl** by Rolf
-Schädler / Troubadix and the TPFanCtrl2 lineage.
+[`LICENSE`](LICENSE)). It builds on the original **TPFanControl** by
+Troubadix ([ThinkWiki page](https://www.thinkwiki.org/wiki/TPFanControl)) and
+the **[TPFanCtrl2](https://github.com/Shuzhengz/TPFanCtrl2)** lineage by
+[Shuzhengz](https://github.com/Shuzhengz) and contributors.
 
-**Third-party:** `TVicPort` (EnTech Taiwan) is *not* covered by this project's
-license — it has its own terms. Ensure you are licensed to use/redistribute it.
-Download:
-[TVicPort (fully-functional freeware)](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6).
+### Ideas & fixes adopted from the fork network
+
+Found during a survey of all TPFanCtrl2 forks (full evidence in
+[`docs/fork-survey-2026-06.json`](docs/fork-survey-2026-06.json)); the
+implementations here are independent, but the ideas deserve credit:
+
+- **Sleep / Modern Standby fan handling** and the post-resume EC settle delay
+  are modeled on work by [FanDjango](https://github.com/FanDjango/TPFanCtrl2)
+  (branches [2.3.12](https://github.com/FanDjango/TPFanCtrl2/tree/2.3.12) /
+  [2.3.13](https://github.com/FanDjango/TPFanCtrl2/tree/2.3.13) of their fork,
+  the actively maintained TPFanCtrl2 line).
+- The **fan-stall watchdog** follows the tachometer-feedback idea from
+  [Tinnci's fork](https://github.com/Tinnci/TPFanCtrl2)
+  ([commit 67f1014](https://github.com/Tinnci/TPFanCtrl2/commit/67f1014)).
+- Two **latent-bug fixes** (power-notification handle lifecycle; a first run
+  without an ini starting windowless) were spotted in
+  [BeteixZ's fork](https://github.com/BeteixZ/TPFanCtrl2)
+  ([commit 10e3ab4](https://github.com/BeteixZ/TPFanCtrl2/commit/10e3ab4b54e8c20ea59fe5db711ab5fe19440403)).
+- The **emergency-hibernate guard** implements upstream feature request
+  [Shuzhengz/TPFanCtrl2#95](https://github.com/Shuzhengz/TPFanCtrl2/issues/95).
+
+### Embedded third-party code
+
+- `SystemTraySDK.cpp/.h` — the `CSystemTray` class by **Chris Maunder**
+  ([CodeProject](https://www.codeproject.com/)), © 1999–2003; original
+  attribution is preserved in the file header.
+- **TVicPort** (EnTech Taiwan) is *not* covered by this project's license — it
+  has its own terms. Ensure you are licensed to use/redistribute it. Download:
+  [TVicPort (fully-functional freeware)](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6).
