@@ -164,16 +164,9 @@ BOOL CSystemTray::Create(
 	DWORD dwBalloonIcon /*=NIIF_NONE*/,
 	UINT uBalloonTimeout /*=10*/
 ) {
-#ifdef _WIN32_WCE
+	// the build targets Vista+ (_WIN32_WINNT 0x0600), so the shell tray is
+	// always present; the old deprecated GetVersion() >= 4 probe is gone
 	m_bEnabled = TRUE;
-#else
-	// this is only for Windows 95 (or higher)
-	m_bEnabled = (GetVersion() & 0xff) >= 4;
-	if (!m_bEnabled) {
-		ASSERT(FALSE);
-		return FALSE;
-	}
-#endif
 
 	m_nMaxTooltipLength = _countof(m_tnd.szTip);
 

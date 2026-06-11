@@ -163,6 +163,7 @@ protected:
 	bool m_failsafeTripped = false;   // true while the fail-safe is holding the fan at max
 	bool m_failsafeWriteWarned = false; // one-shot trace fired: EC rejected the fail-safe write this trip
 	bool m_maxWarned = false;         // slider already prompted for max this visit (avoids re-prompt on repeat WM_HSCROLL)
+	bool m_maxConfirmSuppressed = false; // "don't ask again" ticked on the max-fan prompt (this run only)
 	bool m_manualFieldInvalid = false; // manual box (8310) currently holds a non-EC level (8-63, 65+); tints the text red
 	int ShowBiasedTemps;
 	int SecStartDelay;
@@ -256,6 +257,7 @@ protected:
 	bool m_comInit = false;       // CoInitializeEx succeeded (balanced in dtor)
 	int  m_lastTbSig = -1;        // (overlay|state|progress) dedupe signature
 	void UpdateTaskbarIndicators();   // per-poll overlay/progress refresh
+	void ApplyTaskbarPresence();      // (un)join the taskbar per ShowInTaskbar
 	void ApplyLogVisibility();   // show/hide Log + shrink/restore window width
 	void UpdateTempList();   // repopulate RichEdit 8101 with per-sensor colors
 	void ToggleGameMode(bool silent = false);   // hide/restore TVic driver files; silent on exit/shutdown

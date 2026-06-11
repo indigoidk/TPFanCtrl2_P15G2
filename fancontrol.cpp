@@ -363,30 +363,12 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 		}
 	}
 
-	// Opt-in taskbar presence (ShowInTaskbar=1): drop WS_EX_TOOLWINDOW so the
-	// window joins the taskbar, Alt-Tab and Win11 Snap Layouts, and bind
-	// ITaskbarList3 for the severity overlay + fan-level progress. Done here,
-	// after the slim-dialog swap, so it targets the final window. Every COM
-	// step is failure-tolerant: on any failure behavior is exactly today's.
-	if (this->ShowInTaskbar && this->hwndDialog) {
-		LONG_PTR ex = ::GetWindowLongPtr(this->hwndDialog, GWL_EXSTYLE);
-		::SetWindowLongPtr(this->hwndDialog, GWL_EXSTYLE,
-			(ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW);
-		::SetWindowPos(this->hwndDialog, NULL, 0, 0, 0, 0,
-			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-
-		if (SUCCEEDED(::CoInitializeEx(NULL, COINIT_APARTMENTTHREADED))) {
-			this->m_comInit = true;
-			ITaskbarList3* p = NULL;
-			if (SUCCEEDED(::CoCreateInstance(__uuidof(TaskbarList), NULL,
-					CLSCTX_INPROC_SERVER, __uuidof(ITaskbarList3), (void**)&p)) && p) {
-				if (SUCCEEDED(p->HrInit()))
-					this->m_pTaskbar3 = p;
-				else
-					p->Release();
-			}
-		}
-	}
+	// Opt-in taskbar presence (ShowInTaskbar=1): join the taskbar, Alt-Tab
+	// and Win11 Snap Layouts, with severity overlay + fan-level progress.
+	// Applied here, after the slim-dialog swap, so it targets the final
+	// window; also re-applied live when toggled in Settings.
+	if (this->ShowInTaskbar)
+		this->ApplyTaskbarPresence();
 
 	// Field tooltips: demystify the terse main-window labels. Registered here, on
 	// the *final* window (after the optional slim-dialog swap above), so the tips
@@ -665,6 +647,52 @@ FANCONTROL::ShowMainWindow(bool show) {
 }
 
 //-------------------------------------------------------------------------
+//  apply the ShowInTaskbar setting to the live window: toggle the
+//  WS_EX_TOOLWINDOW/WS_EX_APPWINDOW bits and bind ITaskbarList3 the first
+//  time it is needed. Every COM step is failure-tolerant - on any failure
+//  the window simply behaves like the classic tray-only tool window.
+//-------------------------------------------------------------------------
+void
+FANCONTROL::ApplyTaskbarPresence() {
+	if (!this->hwndDialog)
+		return;
+
+	LONG_PTR ex = ::GetWindowLongPtr(this->hwndDialog, GWL_EXSTYLE);
+	LONG_PTR want = this->ShowInTaskbar
+		? (ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+		: (ex & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW;
+	if (want != ex) {
+		::SetWindowLongPtr(this->hwndDialog, GWL_EXSTYLE, want);
+		::SetWindowPos(this->hwndDialog, NULL, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+	}
+
+	if (this->ShowInTaskbar) {
+		if (!this->m_pTaskbar3) {
+			if (!this->m_comInit && SUCCEEDED(::CoInitializeEx(NULL, COINIT_APARTMENTTHREADED)))
+				this->m_comInit = true;
+			if (this->m_comInit) {
+				ITaskbarList3* p = NULL;
+				if (SUCCEEDED(::CoCreateInstance(__uuidof(TaskbarList), NULL,
+						CLSCTX_INPROC_SERVER, __uuidof(ITaskbarList3), (void**)&p)) && p) {
+					if (SUCCEEDED(p->HrInit()))
+						this->m_pTaskbar3 = p;
+					else
+						p->Release();
+				}
+			}
+		}
+		this->m_lastTbSig = -1;   // push overlay/progress on the next tick
+	}
+	else if (this->m_pTaskbar3) {
+		// leaving the taskbar: clear our decorations from the departing button
+		this->m_pTaskbar3->SetOverlayIcon(this->hwndDialog, NULL, NULL);
+		this->m_pTaskbar3->SetProgressState(this->hwndDialog, TBPF_NOPROGRESS);
+		this->m_lastTbSig = -1;
+	}
+}
+
+//-------------------------------------------------------------------------
 //  taskbar button extras (opt-in via ShowInTaskbar=1): colored severity dot
 //  as the overlay badge, fan level 0-8 as the progress fill (paused/error
 //  states mirror the warm/critical thresholds). Deduped by signature so the
@@ -672,7 +700,7 @@ FANCONTROL::ShowMainWindow(bool show) {
 //-------------------------------------------------------------------------
 void
 FANCONTROL::UpdateTaskbarIndicators() {
-	if (!this->m_pTaskbar3 || !this->hwndDialog)
+	if (!this->m_pTaskbar3 || !this->ShowInTaskbar || !this->hwndDialog)
 		return;
 
 	// overlay: the temperature-severity ids (11-14) map to icon resources;
@@ -804,13 +832,49 @@ FANCONTROL::ShowTrayMenu(const POINT* anchor) {
 }
 
 //-------------------------------------------------------------------------
+//  modern confirmation via TaskDialogIndirect (comctl32 v6, Vista+): native
+//  Win11 chrome for the prompts that were classic MessageBoxA boxes. Falls
+//  back to MessageBoxA if the call fails. Returns the pressed button id.
+//  verify/pVerified: optional "don't ask again"-style checkbox.
+//-------------------------------------------------------------------------
+static int ModernConfirm(HWND owner, PCWSTR title, PCWSTR instruction,
+	PCWSTR content, TASKDIALOG_COMMON_BUTTON_FLAGS buttons, PCWSTR icon,
+	const char* fbText, const char* fbCaption, UINT fbFlags,
+	PCWSTR verify = NULL, BOOL* pVerified = NULL) {
+	TASKDIALOGCONFIG tdc = { sizeof(tdc) };
+	tdc.hwndParent = owner;
+	tdc.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+	tdc.dwCommonButtons = buttons;
+	tdc.pszWindowTitle = title;
+	tdc.pszMainIcon = icon;
+	tdc.pszMainInstruction = instruction;
+	tdc.pszContent = content;
+	tdc.pszVerificationText = verify;
+	int btn = 0;
+	if (SUCCEEDED(::TaskDialogIndirect(&tdc, &btn, NULL, pVerified)) && btn)
+		return btn;
+	return ::MessageBoxA(owner, fbText, fbCaption, fbFlags);
+}
+
+//-------------------------------------------------------------------------
 //  the "fan = maximum (64)" confirmation, shared by the slider and the typed
 //  edit-box path so the warning can't be bypassed by typing the value.
 //  Returns true to proceed to max, false if the user cancelled.
 //-------------------------------------------------------------------------
 bool
 FANCONTROL::ConfirmMaxFan() {
-	return ::MessageBoxA(this->hwndDialog,
+	if (this->m_maxConfirmSuppressed)
+		return true;
+
+	BOOL dontAsk = FALSE;
+	int rc = ModernConfirm(this->hwndDialog,
+		L"Maximum fan speed",
+		L"Set the fan to maximum?",
+		L"Maximum (64) runs the fan at full, unregulated speed. This is loud "
+		L"and bypasses normal speed regulation; the firmware keeps full power "
+		L"until you change the level. Use it only briefly to cool down a hot "
+		L"machine.",
+		TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON,
 		"Setting the fan to maximum (64) runs it at full, "
 		"unregulated speed.\r\n\r\n"
 		"This is loud and bypasses normal speed regulation; "
@@ -818,7 +882,12 @@ FANCONTROL::ConfirmMaxFan() {
 		"change the level. Use it only briefly to cool down a "
 		"hot machine.\r\n\r\nSet fan to maximum?",
 		"Maximum fan speed",
-		MB_OKCANCEL | MB_ICONWARNING) == IDOK;
+		MB_OKCANCEL | MB_ICONWARNING,
+		L"Don't ask again until the next start", &dontAsk);
+
+	if (rc == IDOK && dontAsk)
+		this->m_maxConfirmSuppressed = true;
+	return rc == IDOK;
 }
 
 //-------------------------------------------------------------------------
@@ -1504,7 +1573,16 @@ FANCONTROL::ToggleGameMode(bool silent) {
 	// drivers in System32, a privileged system-wide change. Restore, and any
 	// silent (exit/shutdown) call, is never gated.
 	if (!silent && !this->m_driversHidden) {
-		int a = ::MessageBoxA(this->hwndDialog,
+		int a = ModernConfirm(this->hwndDialog,
+			L"Enable Game Mode (Hide Drivers)",
+			L"Hide the TVic kernel drivers?",
+			L"Game Mode renames the TVicHW64 / TVicPort64 kernel drivers in "
+			L"C:\\Windows\\System32\\drivers so anti-cheat software (e.g. "
+			L"Vanguard) cannot see them.\n\n"
+			L"While hidden, fan control still works, but the drivers are only "
+			L"restored on a clean exit (or recovered automatically on the next "
+			L"launch).",
+			TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON,
 			"Game Mode renames the TVicHW64 / TVicPort64 kernel drivers in\r\n"
 			"C:\\Windows\\System32\\drivers so anti-cheat software (e.g. Vanguard)\r\n"
 			"cannot see them.\r\n\r\n"
@@ -3667,19 +3745,6 @@ FANCONTROL::DlgProc(HWND
 			this->ShowMainWindow(!IsWindowVisible(this->hwndDialog));
 			break;
 
-		case WM_LBUTTONUP:
-		{
-			BOOL
-				isshift = ::GetAsyncKeyState(VK_SHIFT) & 0x8000,
-				isctrl = ::GetAsyncKeyState(VK_CONTROL) & 0x8000;
-
-			int action = -1;
-
-			// some fancy key dependent stuff could be done here.
-
-		}
-		break;
-
 		case WM_LBUTTONDBLCLK:
 			if (trayV4) break;   // NIN_SELECT covers this under v4
 			this->ShowMainWindow(!IsWindowVisible(this->hwndDialog));
@@ -3744,6 +3809,7 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 		::CheckDlgButton(hwnd, 9301, self->StartMinimized ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9302, self->StayOnTop      ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9328, self->ShowInTaskbar  ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9303, self->ShowTempIcon   ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9304, self->ShowTempHex    ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9305, self->ShowLog        ? BST_CHECKED : BST_UNCHECKED);
@@ -3805,6 +3871,9 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				"Start hidden in the tray instead of opening the window.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9302,
 				"Keep the main window above other windows.");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9328,
+				"Show a taskbar button (Alt-Tab, Snap Layouts) with a temperature "
+				"badge and fan-level progress, in addition to the tray icon.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9307,
 				"Suppress the tray balloon pop-ups (mode changes, warnings).");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9308,
@@ -3960,9 +4029,11 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 	int oldTop   = this->StayOnTop;
 	int oldIcon  = this->ShowTempIcon;
 	int oldCycle = this->Cycle;
+	int oldTb    = this->ShowInTaskbar;
 
 	this->StartMinimized = (::IsDlgButtonChecked(hwnd, 9301) == BST_CHECKED);
 	this->StayOnTop      = (::IsDlgButtonChecked(hwnd, 9302) == BST_CHECKED);
+	this->ShowInTaskbar  = (::IsDlgButtonChecked(hwnd, 9328) == BST_CHECKED);
 	this->ShowTempIcon   = (::IsDlgButtonChecked(hwnd, 9303) == BST_CHECKED);
 	this->ShowTempHex    = (::IsDlgButtonChecked(hwnd, 9304) == BST_CHECKED);
 	this->ShowLog        = (::IsDlgButtonChecked(hwnd, 9305) == BST_CHECKED);
@@ -4038,6 +4109,8 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 	if (this->StayOnTop != oldTop)
 		::SetWindowPos(main, this->StayOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
 			0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	if (this->ShowInTaskbar != oldTb)
+		this->ApplyTaskbarPresence();
 	if (this->Cycle != oldCycle) {
 		::KillTimer(main, 1);
 		this->m_fanTimer = ::SetTimer(main, 1, 1000 * this->Cycle, NULL);
@@ -4087,7 +4160,13 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 		char msg[256] = "Some values were out of range and left unchanged:\r\n";
 		if (badCycle)      strcat_s(msg, sizeof(msg), "\r\n\xb7 Poll interval must be 1-600 seconds.");
 		if (badThresholds) strcat_s(msg, sizeof(msg), "\r\n\xb7 Icon thresholds must ascend (warm < hot < critical), within 1-120.");
-		::MessageBoxA(hwnd, msg, "Settings", MB_OK | MB_ICONWARNING);
+		wchar_t wmsg[256] = L"";
+		if (badCycle)      wcscat_s(wmsg, _countof(wmsg), L"\x2022 Poll interval must be 1-600 seconds.\n");
+		if (badThresholds) wcscat_s(wmsg, _countof(wmsg), L"\x2022 Icon thresholds must ascend (warm < hot < critical), within 1-120.\n");
+		ModernConfirm(hwnd, L"Settings",
+			L"Some values were out of range and left unchanged", wmsg,
+			TDCBF_OK_BUTTON, TD_WARNING_ICON,
+			msg, "Settings", MB_OK | MB_ICONWARNING);
 		return false;
 	}
 	return true;

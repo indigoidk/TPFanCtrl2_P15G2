@@ -74,49 +74,8 @@ MUTEXSEM::Unlock() {
 //                                                                          // 
 //////////////////////////////////////////////////////////////////////////////
 
-struct NOTIFYICONDATAV5 {
-	NOTIFYICONDATA nof;
-	TCHAR szTipExtra[64];    //Version 5.0
-	DWORD dwState;            //Version 5.0
-	DWORD dwStateMask;        //Version 5.0
-	TCHAR szInfo[256];        //Version 5.0
-	union {
-		UINT uTimeout;        //Version 5.0
-		UINT uVersion;        //Version 5.0
-	} DUMMYUNIONNAME;
-	TCHAR szInfoTitle[64];    //Version 5.0
-	DWORD dwInfoFlags;        //Version 5.0
-};
-
-struct NOTIFYICONDATAV6 {
-	DWORD cbSize;
-	HWND hWnd;
-	UINT uID;
-	UINT uFlags;
-	UINT uCallbackMessage;
-	HICON hIcon;
-	TCHAR szTip[64];
-	DWORD dwState;
-	DWORD dwStateMask;
-	TCHAR szInfo[256];
-	union {
-		UINT uTimeout;
-		UINT uVersion;
-	};
-	TCHAR szInfoTitle[64];
-	DWORD dwInfoFlags;
-	GUID guidItem;
-	HICON hBalloonIcon;
-};
-
-struct OSVERSIONINFOV4 {
-	DWORD dwOSVersionInfoSize;
-	DWORD dwMajorVersion;
-	DWORD dwMinorVersion;
-	DWORD dwBuildNumber;
-	DWORD dwPlatformId;
-	TCHAR szCSDVersion[128];
-};
+// (the hand-rolled NOTIFYICONDATAV5/V6 and OSVERSIONINFOV4 layouts are gone:
+// at _WIN32_WINNT 0x0600 the SDK's NOTIFYICONDATA is already the full struct)
 
 //-------------------------------------------------------------------------
 //  Represent a window in the taskbar

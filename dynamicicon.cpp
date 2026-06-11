@@ -192,27 +192,6 @@ HICON CDynamicIcon::GetHIcon() {
 HFONT CDynamicIcon::CreateFont(const HDC hDC, int size, bool big) {
     LOGFONT lf;
 
-//#define DEV_FIND_FONT
-#ifdef DEV_FIND_FONT //fontdialog for developper
-    CHOOSEFONT cf; 
-    cf.lStructSize = sizeof(CHOOSEFONT); 
-    cf.hwndOwner = (HWND)NULL; 
-    cf.hDC = hDC;//(HDC)NULL; 
-    cf.lpLogFont = &lf; 
-    cf.iPointSize = 0; 
-    cf.Flags = CF_SCREENFONTS; 
-    cf.rgbColors = RGB(0,0,0); 
-    cf.lCustData = 0L; 
-    cf.lpfnHook = (LPCFHOOKPROC)NULL; 
-    cf.lpTemplateName = (LPSTR)NULL; 
-    cf.hInstance = (HINSTANCE) NULL; 
-    cf.lpszStyle = (LPSTR)NULL; 
-    cf.nFontType = SCREEN_FONTTYPE; 
-    cf.nSizeMin = 0; 
-    cf.nSizeMax = 0; 
-    ChooseFont(&cf);
-#endif //fontdialog for developper
-
     SecureZeroMemory(&lf, sizeof(LOGFONT));
     // base height -9 was tuned for 16px; scale it for the actual icon size
     lf.lfHeight = MulDiv(big ? -12 : -9, size, 16);

@@ -58,7 +58,7 @@ BEGIN
     CTEXT           "7",8327,223,137,12,8
     CTEXT           "Max",8328,236,137,20,8
     LTEXT           "Temperatures",9198,15,7,74,9
-    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,78,74
+    CONTROL         "",8101,"RICHEDIT50W",ES_MULTILINE | ES_READONLY,15,18,78,74
     LTEXT           "Status",9199,103,145,116,9
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Last change",9196,103,169,50,8
@@ -99,7 +99,7 @@ BEGIN
     LTEXT           "Speed",IDC_STATIC,3,182,29,8
     EDITTEXT        8102,2,190,47,13,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Temps",9220,2,1,45,9
-    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,2,11,49,102
+    CONTROL         "",8101,"RICHEDIT50W",ES_MULTILINE | ES_READONLY,2,11,49,102
     CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT | WS_TABSTOP | WS_GROUP,3,116,20,10
     CONTROL         "act",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,25,116,20,10
 END
@@ -137,7 +137,7 @@ BEGIN
     CTEXT           "7",8327,220,137,12,8
     CTEXT           "Max",8328,234,137,20,8
     LTEXT           "Temperatures",9198,15,7,74,9
-    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,15,18,78,74
+    CONTROL         "",8101,"RICHEDIT50W",ES_MULTILINE | ES_READONLY,15,18,78,74
     LTEXT           "Status",9199,103,145,116,9
     EDITTEXT        8112,103,155,145,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Last change",9196,103,169,50,8
@@ -177,7 +177,7 @@ BEGIN
     LTEXT           "Speed",IDC_STATIC,3,182,29,8
     EDITTEXT        8102,3,190,63,13,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Temperatures",9220,3,1,64,9
-    CONTROL         "",8101,"RichEdit20A",ES_MULTILINE | ES_READONLY,2,11,65,102
+    CONTROL         "",8101,"RICHEDIT50W",ES_MULTILINE | ES_READONLY,2,11,65,102
     // declared in on-screen order (active is left of all) so arrow keys track
     CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT | WS_TABSTOP | WS_GROUP,6,118,31,10
     CONTROL         "all",7001,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,43,118,18,10
@@ -198,7 +198,8 @@ BEGIN
     CONTROL         "Show temperature history graph",9314,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,70,200,10
     LTEXT           "Window",9341,7,84,200,9
     CONTROL         "Start minimized to tray",9301,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,95,200,10
-    CONTROL         "Always on top",9302,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,108,200,10
+    CONTROL         "Always on top",9302,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,108,90,10
+    CONTROL         "Show in taskbar",9328,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,110,108,105,10
     LTEXT           "Notifications && logging",9342,7,122,200,9
     CONTROL         "Disable balloon notifications",9307,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,133,200,10
     CONTROL         "Write TPFanControl.log",9308,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,146,95,10

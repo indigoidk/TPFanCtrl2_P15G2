@@ -10,8 +10,8 @@
 # Local Claude Code session data
 .claude/
 
-# Resource compiler temp files
-res/RC[a-z][0-9]*
+# Resource compiler temp files (appear in res/ and the repo root)
+RC[a-z][0-9]*
 
 # Claude Code session memory
 memory/

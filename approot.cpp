@@ -7,7 +7,7 @@ int APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR aArgs, int) {
     hInstRes = instance;
     hInstApp = instance;
 
-    // Harden runtime DLL loads (e.g. LoadLibraryA("riched20.dll")) against
+    // Harden runtime DLL loads (e.g. LoadLibraryA("msftedit.dll")) against
     // planting: search only System32 by name, never the (possibly user-writable)
     // application directory. NOTE: this does NOT cover the load-time TVicPort.dll
     // import, which the loader resolves before WinMain runs - that one is addressed
@@ -314,7 +314,11 @@ void WorkerThread(void *dummy) {
 	hInstRes=GetModuleHandle(NULL);
 	hInstApp=hInstRes;
 
-	::InitCommonControls();
+	// explicit registration of the classes the dialogs use (trackbar, tooltips,
+	// progress live in the Win95 set; buttons/edits/statics in the standard set)
+	INITCOMMONCONTROLSEX icc = { sizeof(icc),
+		ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES };
+	::InitCommonControlsEx(&icc);
 
 	// Change to the directory where the exe resides
 	char exepath[MAX_PATH];
@@ -352,7 +356,7 @@ void WorkerThread(void *dummy) {
 		SetHardAccess(NewHardAccess);
 		HardAccess = TestHardAccess();
 
-		LoadLibraryA("riched20.dll");  // register RichEdit20A class for temp list
+		LoadLibraryA("msftedit.dll");  // register RICHEDIT50W (RichEdit 4.1) for the temp list
 		FANCONTROL fc(hInstApp);
 
         g_dialogWnd = fc.GetDialogWnd();
