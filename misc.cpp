@@ -59,6 +59,7 @@ FANCONTROL::SaveConfig(const char* configfile)
 		{ "Lev64Norm",      this->Lev64Norm },
 		{ "NoExtSensor",    this->NoExtSensor },
 		{ "FailsafeTemp",   this->FailsafeTemp },   // deg C, 0 = off
+		{ "CriticalTemp",   this->CriticalTemp },   // deg C, 0 = off (hibernate guard)
 	};
 	const int N = (int)(sizeof(items) / sizeof(items[0]));
 	bool done[32] = { false };
@@ -610,6 +611,13 @@ FANCONTROL::ReadConfig(const char* configfile)
 				this->SuspendMode = (v >= 0 && v <= 2) ? v : 1;
 				continue;
 			}
+
+			// emergency hibernate threshold (deg C, 0 = off; sane range only)
+			if (_strnicmp(buf, "CriticalTemp=", 13) == 0) {
+				int v = atoi(buf + 13);
+				this->CriticalTemp = (v >= 70 && v <= 110) ? v : 0;
+				continue;
+			}
 			
 			if (_strnicmp(buf, "Log2csv=", 8) == 0) {
 				this->Log2csv = atoi(buf + 8);
@@ -789,7 +797,12 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"# Sleep handling (suspend / Modern Standby): 0 = ignore sleep,\r\n"
 				"# 1 = hand fan to BIOS during sleep and restore the mode after resume,\r\n"
 				"# 2 = keep the current mode (still re-asserts the level after resume)\r\n"
-				"SuspendMode=1\r\n",
+				"SuspendMode=1\r\n"
+				"\r\n"
+				"# Emergency hibernate: if the max temperature holds at/above this\r\n"
+				"# (deg C, 70-110) even at full fan speed, hibernate before the firmware\r\n"
+				"# thermal trip cuts power. 0 = disabled. Recommended: 95.\r\n"
+				"CriticalTemp=0\r\n",
 				fnew);
 			fclose(fnew);
 			this->Trace("TPFanControl.ini not found - created a default one");

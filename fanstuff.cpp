@@ -18,6 +18,27 @@
 #include "_prec.h"
 #include "fancontrol.h"
 #include "tools.h"
+#include <powrprof.h>   // SetSuspendState (emergency hibernate)
+#pragma comment(lib, "powrprof.lib")
+
+//-------------------------------------------------------------------------
+//  enable SeShutdownPrivilege (held but disabled, even for an admin token)
+//  and hibernate. SetSuspendState returns on resume; on failure the machine
+//  simply keeps running with the fan already forced to max.
+//-------------------------------------------------------------------------
+static void EmergencyHibernate() {
+	HANDLE hTok = NULL;
+	if (::OpenProcessToken(::GetCurrentProcess(),
+			TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hTok)) {
+		TOKEN_PRIVILEGES tp = {};
+		tp.PrivilegeCount = 1;
+		tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+		if (::LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tp.Privileges[0].Luid))
+			::AdjustTokenPrivileges(hTok, FALSE, &tp, 0, NULL, NULL);
+		::CloseHandle(hTok);
+	}
+	::SetSuspendState(TRUE /*hibernate*/, TRUE, FALSE);
+}
 #include "TVicPort.h"
 #include "fanlogic.h"   // pure decision logic (unit-tested in tests/fanlogic_tests.cpp)
 
@@ -349,6 +370,8 @@ FANCONTROL::HandleData(void) {
 	// to max every poll, doubling EC writes and log spam during an overheat.
 	if (this->FailsafeTemp > 0 && this->ActiveMode &&
 		(this->CurrentMode == 2 || this->CurrentMode == 3)) {
+		// (critical-temp hibernate guard sits after this block - it is the
+		// escalation path for when full fan speed is not enough)
 		// log both flag transitions explicitly: SetFan only logs when it has to
 		// write, so a trip with the fan already at max would otherwise leave no
 		// record in the trace - exactly the event worth a timestamp after a
@@ -375,6 +398,38 @@ FANCONTROL::HandleData(void) {
 			this->Trace("Fail-safe released: disabled or mode left Smart/Manual");
 		this->m_failsafeTripped = false;   // disabled, or mode left Smart/Manual
 		this->m_failsafeWriteWarned = false;
+	}
+
+	// Emergency hibernate (last line of defense; upstream ask #95): if max
+	// temp holds at/above CriticalTemp for 3 consecutive polls - i.e. even
+	// the fail-safe's full fan speed is losing - force max fan one final
+	// time and hibernate before the firmware's hard thermal trip cuts power.
+	// Mode-independent: critical heat is critical in BIOS mode too. Re-arms
+	// only after cooling 5 C below the threshold so a resume into a
+	// still-hot machine cannot loop straight back into hibernation.
+	if (this->CriticalTemp > 0) {
+		if (this->m_critFired) {
+			if (this->MaxTemp <= this->CriticalTemp - 5) {
+				this->m_critFired = false;
+				this->Trace("Critical-temp guard re-armed (cooled below threshold)");
+			}
+		}
+		else if (this->MaxTemp >= this->CriticalTemp) {
+			if (++this->m_critPolls >= 3) {
+				this->m_critFired = true;
+				this->m_critPolls = 0;
+				char cbuf[160];
+				sprintf_s(cbuf, sizeof(cbuf),
+					"CRITICAL: max temp %d C at/above %d C for 3 polls - forcing max fan and hibernating",
+					this->MaxTemp, this->CriticalTemp);
+				this->Trace(cbuf);
+				this->SetFan("Critical", FAN_CTRL_FULL);
+				::MessageBeep(MB_ICONERROR);
+				EmergencyHibernate();   // returns on resume (or on failure)
+			}
+		}
+		else
+			this->m_critPolls = 0;
 	}
 
 	switch (this->CurrentMode) {

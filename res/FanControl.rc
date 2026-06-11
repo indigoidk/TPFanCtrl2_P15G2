@@ -27,7 +27,7 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_DEFAULT
 9000 DIALOGEX 30, 20, 571, 250
 STYLE DS_SETFONT | WS_CLIPCHILDREN | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_TOPMOST | WS_EX_TOOLWINDOW
-CAPTION "TPFanControl v2.33 P15G2 Dual "
+CAPTION "TPFanControl v2.34 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     LTEXT           "Fan Control",9210,103,7,116,9
@@ -106,7 +106,7 @@ END
 
 9002 DIALOGEX 30, 20, 571, 250
 STYLE DS_SETFONT | WS_CLIPCHILDREN | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CAPTION | WS_SYSMENU
-CAPTION "TPFanControl v2.33 P15G2 Dual "
+CAPTION "TPFanControl v2.34 P15G2 Dual "
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     LTEXT           "Fan Control",9210,103,7,116,9
@@ -378,8 +378,8 @@ END
 //
 
 1 VERSIONINFO
- FILEVERSION 2,33,7,0
- PRODUCTVERSION 2,33,7,0
+ FILEVERSION 2,34,0,0
+ PRODUCTVERSION 2,34,0,0
  FILEFLAGSMASK 0x8L
 #ifdef _DEBUG
  FILEFLAGS 0x9L
@@ -396,13 +396,13 @@ BEGIN
         BEGIN
             VALUE "Comments", "Usage on own risk!"
             VALUE "FileDescription", "Fan Control Software"
-            VALUE "FileVersion", "2, 33, 7, 0"
-            VALUE "InternalName", "TPFanControl v2.33 P15G2 Dual"
-            VALUE "LegalTrademarks", "TPFanControl v2.33 P15G2 Dual"
+            VALUE "FileVersion", "2, 34, 0, 0"
+            VALUE "InternalName", "TPFanControl v2.34 P15G2 Dual"
+            VALUE "LegalTrademarks", "TPFanControl v2.34 P15G2 Dual"
             VALUE "OriginalFilename", "TPFanControl.exe"
             VALUE "PrivateBuild", "Fan Control Software"
-            VALUE "ProductName", "TPFanControl v2.33 P15G2 Dual"
-            VALUE "ProductVersion", "2, 33, 7, 0"
+            VALUE "ProductName", "TPFanControl v2.34 P15G2 Dual"
+            VALUE "ProductVersion", "2, 34, 0, 0"
             VALUE "SpecialBuild", "easy easy setup"
         END
     END

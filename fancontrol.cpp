@@ -457,7 +457,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 		if (!NoWaitMessage) {
 			sprintf_s(bufsec, sizeof(bufsec),
-				"TPFanControl v2.33 P15G2 Dual is started %d sec. after\nboot time (SecWinUptime=%d sec.)\n\nTo prevent missing systray icons\nand communication errors between\nTPFanControl v2.33 P15G2 Dual and embedded controller\nit will sleep for %d sec. (SecStartDelay)\n\nTo void this message box please set\nNoWaitMessage=1 in TPFanControl.ini",
+				"TPFanControl v2.34 P15G2 Dual is started %d sec. after\nboot time (SecWinUptime=%d sec.)\n\nTo prevent missing systray icons\nand communication errors between\nTPFanControl v2.34 P15G2 Dual and embedded controller\nit will sleep for %d sec. (SecStartDelay)\n\nTo void this message box please set\nNoWaitMessage=1 in TPFanControl.ini",
 				(int)(tickCount / 1000), SecWinUptime, SecStartDelay);
 
 			// Don't show message box when running as service on Vista+
@@ -470,7 +470,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 			if (isVistaOrLater && Runs_as_service == TRUE)
 				;
 			else
-				MessageBox(NULL, bufsec, "TPFanControl v2.33 P15G2 Dual is sleeping", MB_ICONEXCLAMATION);
+				MessageBox(NULL, bufsec, "TPFanControl v2.34 P15G2 Dual is sleeping", MB_ICONEXCLAMATION);
 		}
 	}
 
@@ -483,7 +483,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	// taskbaricon (keep code after reading config)
 	if (this->MinimizeToSysTray) {
 		if (!this->ShowTempIcon) {
-			this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.33 P15G2 Dual");
+			this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.34 P15G2 Dual");
 		}
 		else {
 			this->pTaskbarIcon = NULL;
@@ -1741,7 +1741,7 @@ FANCONTROL::ToggleGameMode(bool silent) {
 		} else if (!silent) {
 			char msg[256];
 			sprintf_s(msg, sizeof(msg),
-				"Could not hide TVic drivers (error %lu).\n\nTPFanControl v2.33 P15G2 Dual must run with administrator privileges for Game Mode.",
+				"Could not hide TVic drivers (error %lu).\n\nTPFanControl v2.34 P15G2 Dual must run with administrator privileges for Game Mode.",
 				lastErr);
 			::MessageBoxA(this->hwndDialog, msg, "Game Mode", MB_OK | MB_ICONWARNING);
 		}
@@ -1767,7 +1767,7 @@ FANCONTROL::ToggleGameMode(bool silent) {
 			if (!silent && this->pTaskbarIcon && !this->NoBallons)
 				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
 					"Game Mode OFF",
-					"TVic drivers restored. TPFanControl v2.33 P15G2 Dual running normally.", 8000);
+					"TVic drivers restored. TPFanControl v2.34 P15G2 Dual running normally.", 8000);
 		} else if (!silent) {
 			char msg[256];
 			sprintf_s(msg, sizeof(msg),
@@ -3311,7 +3311,7 @@ FANCONTROL::DlgProc(HWND
 					this->pTaskbarIcon->SetIcon(icon);
 					this->CurrentIcon = icon;
 					if (this->m_showSymbolBalloon && !this->NoBallons) {
-						this->pTaskbarIcon->SetBalloon(NIIF_INFO, "TPFanControl v2.33 P15G2 Dual symbol icon",
+						this->pTaskbarIcon->SetBalloon(NIIF_INFO, "TPFanControl v2.34 P15G2 Dual symbol icon",
 							"shows temperature level by color and state in tooltip, left click on icon shows or hides control window, right click shows menue",
 							11);
 						this->m_showSymbolBalloon = false;
@@ -3483,7 +3483,7 @@ FANCONTROL::DlgProc(HWND
 				case 5070: // switch to classic colored symbol icon
 					this->ShowTempIcon = 0;
 					if (!this->pTaskbarIcon) {   // guard: don't leak an existing icon
-						this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.33 P15G2 Dual");
+						this->pTaskbarIcon = new TASKBARICON(this->hwndDialog, 10, "TPFanControl v2.34 P15G2 Dual");
 						this->pTaskbarIcon->SetIcon(this->CurrentIcon);
 					}
 					break;
@@ -4714,12 +4714,12 @@ void FANCONTROL::ProcessTextIcons(void) {
 				if (Fahrenheit) {
 					ppTbTextIcon[0]->DiShowballon(
 						_T("shows max. temperature in \xb0 F and sensor name, left click on icon shows or hides control window, right click shows menue"),
-						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11, hToast);
+						_T("TPFanControl v2.34 P15G2 Dual text icon"), NIIF_INFO, 11, hToast);
 				}
 				else {
 					ppTbTextIcon[0]->DiShowballon(
 						_T("shows max. temperature in \xb0 C and sensor name, left click on icon shows or hides control window, right click shows menue"),
-						_T("TPFanControl v2.33 P15G2 Dual text icon"), NIIF_INFO, 11, hToast);
+						_T("TPFanControl v2.34 P15G2 Dual text icon"), NIIF_INFO, 11, hToast);
 				}
 				if (hToast)
 					::DestroyIcon(hToast);   // the shell copied it

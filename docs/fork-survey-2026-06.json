@@ -1,0 +1,399 @@
+{
+  "summary": "Analyze diverged TPFanCtrl2 forks for features worth adopting",
+  "agentCount": 8,
+  "logs": [],
+  "result": [
+    {
+      "fork": "Tinnci/TPFanCtrl2",
+      "ahead": 111,
+      "summary": "Tinnci/TPFanCtrl2 (author shisoratsu) is a ground-up rewrite, not an incremental fork: starting 2025-12-22 it replaced the Win32 dialog app with an ImGui/Vulkan UI, an xmake build with GoogleTest, and a layered Core architecture (ECManager/FanController/SensorManager/ThermalManager with observer events), plus spdlog/std::format logging, JSON config, English/Chinese i18n, and PID closed-loop control with auto-tune. Nearly all 111 ahead-commits land in a Dec 22-25 2025 burst with two follow-up cleanups (Apr 5 and May 13, 2026). Because it is framework-heavy (Vulkan, ImGui, gtest, spdlog), almost nothing is portable as a diff to our deliberately tiny Win32 app — but two small control-loop ideas (fan tachometer stall recovery, per-sensor weights) are genuinely worth lifting as concepts.",
+      "notable": [
+        {
+          "feature": "Fan tachometer stall detection with command reapply",
+          "detail": "Each poll cycle, EvaluateFanFeedback() checks: if the commanded EC level is below 0x80 (i.e. a manual/smart level that should spin the fan) but fan1 tach reads under 300 RPM, a counter increments; after 3 consecutive low readings it logs 'Fan tachometer reports {} RPM at EC level 0x{:02X}; reapplying control command' and re-issues SetFanLevel() to recover from the EC silently dropping the command. Counter resets on healthy RPM or level >= 0x80. Our fork has the thermal fail-safe (force 0x40 over a temp threshold) and EC read-error fail-back to BIOS, but nothing that detects 'fan commanded but not spinning' and rewrites the fan register — this catches a different failure mode (lost/ignored EC write, fan stuck at 0 while temps climb).",
+          "adoptable": true,
+          "evidence": "Commit 67f1014 'feat(thermal): enhance fan feedback evaluation and logging for RPM discrepancies' (https://github.com/Tinnci/TPFanCtrl2/commit/67f1014) — diff verified: new ThermalManager::EvaluateFanFeedback(), members m_fanNoSpinCounter, kFanMinOperationalRpm=300, kFanSpinRetryThreshold=3",
+          "effort": "~30-60 lines in our existing poll loop (fanstuff.cpp): a counter, an RPM-vs-level check against the values we already read from EC offset 0x84, and a re-issue of the current fan level. No new files."
+        },
+        {
+          "feature": "Per-sensor multiplicative weights (weighted sensor fusion)",
+          "detail": "Config keys SensorWeight1..16 (float, default 1.0) and SensorName1..16; the control temperature becomes Max(SensorTemp * SensorWeight). Documented rationale: Weight = GlobalTarget / SensorTarget, e.g. PID target 80C but battery should stay under 50C -> SensorWeight5=1.6, so the battery sensor effectively gets its own lower target across the whole curve. Our fork has additive offsets and ignore lists; a multiplicative weight is a different mechanism — an offset shifts a sensor by a constant, a weight rescales it so one sensor can have a proportionally stricter target at every smart-curve threshold. Same commit also added a 5-sample moving-average smoothing of temps (we already get jitter immunity from smart-curve hysteresis).",
+          "adoptable": true,
+          "evidence": "Commits 9e823d7 'feat: Add sensor weight and name configurations to ConfigManager and SensorManager' (https://github.com/Tinnci/TPFanCtrl2/commit/9e823d7, includes TPFanCtrl2.ini doc: 'The final temperature used for control is Max(SensorTemp * SensorWeight)') and b4f9d2c 'feat: Enhance sensor management with custom naming, weighting, and safety features'",
+          "effort": "~40-80 lines: INI parse for SensorWeightN next to our existing offset parsing, one multiply in the max-temp computation, optional display of the weighted value. Worth weighing against our existing offsets first — partial overlap in purpose."
+        },
+        {
+          "feature": ".gitattributes for line-ending/diff hygiene",
+          "detail": "The fork carries a root .gitattributes (upstream-style). Per our own fork-vs-upstream audit, a missing .gitattributes is the single remaining hygiene gap in our repo; this fork demonstrates the file is the norm across the network.",
+          "adoptable": true,
+          "evidence": "Root file listing of https://github.com/Tinnci/TPFanCtrl2 shows .gitattributes at repo root (file path: /.gitattributes)",
+          "effort": "1 file, a few lines (text=auto plus binary entries for .lib/.ico/.exe)."
+        },
+        {
+          "feature": "PID closed-loop fan control with auto-tune and step-response preview",
+          "detail": "Alternative to threshold tables: FanController::UpdatePIDControl(float currentTemp, const PIDSettings&, float dt) with defaults Kp=0.5, Ki=0.01, Kd=0.1, integral and lastError state, mapped onto a minFan..maxFan range; UI adds PID parameter visualization, step-response preview, and auto-tune. Notably no anti-windup mechanism is visible in the implementation, which risks integral runaway during long thermal saturation. Not adoptable: it duplicates what our Smart curve editor already achieves, the auto-tune/preview is ImGui-bound, and the core impl has a known control-theory gap.",
+          "adoptable": false,
+          "evidence": "Commits 7e29cfb 'Feat: Implement PID control for fan speed management...', cfe8fa3 'Feat: Add PID control settings and configuration saving functionality', 8b376ac 'feat: add PID step response preview and auto-tune functionality'; FanController.h (https://raw.githubusercontent.com/Tinnci/TPFanCtrl2/main/fancontrol/FanController.h) verified: m_integral, m_lastError, struct PIDSettings {Kp=0.5f, Ki=0.01f, Kd=0.1f}, no anti-windup",
+          "effort": "Core PID ~100-200 lines, but config/UI surface much larger; not recommended."
+        },
+        {
+          "feature": "Full ImGui + Vulkan UI rewrite with i18n (EN/ZH)",
+          "detail": "Replaced the Win32 dialog UI entirely: ImGui rendered via Vulkan on a decoupled hardware thread, sidebar navigation, sensor-management table (custom names, weights, ignore toggles, live temps), theme system, Chinese/English translation manager, DPI scaling. This is the bulk of the 111 commits. Architecturally clean but the polar opposite of our no-framework Win32 approach — we already have dark mode, DPI-PerMonitorV2, sparkline, settings dialogs natively.",
+          "adoptable": false,
+          "evidence": "Commit e6df032 'Implement modern ImGui GUI with Vulkan backend and decoupled hardware thread' (Dec 22 2025); c66d3f1 'Feat: Implement internationalization support with language selection and translation management'; repo description: 'A modern, high-performance fan control utility ... featuring an ImGui/Vulkan UI and smart PID control logic'",
+          "effort": "Not applicable (wholesale framework adoption)."
+        },
+        {
+          "feature": "EC access hardening (mutex, OBF drain, EC-type retry, write-verify)",
+          "detail": "ECManager wraps every EC transaction in a std::recursive_timed_mutex, drains the output buffer (OBF) before issuing commands to avoid stale-data corruption, probes two EC handshake types at init and switches-and-retries on timeout, and ToggleBitsWithVerify() reads back written values with up to 5 retries at 300ms. Solid, but functionally equivalent to the EC safety our fork already has (we meet/exceed upstream 2.3.3's EC/fan safety fixes, and our EC access is single-threaded by design so the mutex solves a problem we don't have).",
+          "adoptable": false,
+          "evidence": "Commit 34d7dc3 'Modernize: Migrate low-level EC writes to FanController and ECManager, implement thread-safe locking'; ECManager.cpp content verified (recursive_timed_mutex lock_guard, drainObf lambda, 'timed out, switching EC type and retrying...', readback verify loop)",
+          "effort": "n/a — parity already."
+        },
+        {
+          "feature": "90C fail-safe that hands control back to BIOS (0x80)",
+          "detail": "Safety logic: if (maxTemp >= 90 && maxTemp < 128) fans->SetFanLevels(0x80, 0x80) — i.e. above 90C it forces BIOS auto mode rather than max fan. Our fail-safe forces 0x40 (full speed), which is the stronger guarantee on a P15G2 (BIOS auto can still be lazy); their variant is a design alternative, not an improvement to adopt.",
+          "adoptable": false,
+          "evidence": "Commit b4f9d2c 'feat: Enhance sensor management with custom naming, weighting, and safety features' — quoted diff code: 'if (maxTemp >= 90 && maxTemp < 128) { fans->SetFanLevels(0x80, 0x80); // Force BIOS control }'",
+          "effort": "n/a — we have the stronger 0x40 fail-safe."
+        },
+        {
+          "feature": "Fan2 auto-disable after repeated zero-RPM reads",
+          "detail": "Dual-fan robustness for unknown hardware: m_fan2ZeroCount with kFan2DisableThreshold=5 stops issuing fan2 commands after five consecutive 0-RPM readings (treats the machine as single-fan), with kFan1ActiveRpmThreshold=400 as the plausibility gate. Useful for a generic multi-model fork; wrong for ours — the P15G2 is known dual-fan, and silently ceasing fan2 commands would mask a dead fan instead of escalating, contradicting our fail-safe philosophy.",
+          "adoptable": false,
+          "evidence": "fancontrol/FanController.h (https://raw.githubusercontent.com/Tinnci/TPFanCtrl2/main/fancontrol/FanController.h): 'm_fan2ZeroCount', 'static constexpr int kFan2DisableThreshold = 5', 'kFan1ActiveRpmThreshold = 400'; dual-fan support introduced in f0ea178 'feat(fancontrol): add dual fan support and related configuration options' and 950bc9a",
+          "effort": "n/a — undesirable for a machine-specific dual-fan fork."
+        },
+        {
+          "feature": "Build/CI/test modernization: xmake, GoogleTest + mock IO, CodeQL/Dependabot//W4, dynamic git-tag versioning",
+          "detail": "Switched to xmake with GoogleTest integration and an IIOProvider/MockIOProvider seam so sensor/control logic is unit-testable without hardware; GitHub Actions split into ci.yml/release.yml with git-tag-derived versioning; CodeQL + Dependabot + /W4 enabled — though the fork itself later removed CodeQL ('ci: remove codeql workflow') after a long string of CI-fix commits. We already have build.yml/release.yml, an msbuild pipeline, a unit-test runner, and a warning-free build, so nothing here is a net gain; xmake/gtest would be bloat.",
+          "adoptable": false,
+          "evidence": "Commits 5420956 'Build: Switch to xmake build system', 0ddb5bf 'Test: Integrate GoogleTest (gTest) via xmake', 3ce4012 'security: enable CodeQL analysis, Dependabot, and strict MSVC warnings (/W4)', 694718f 'ci: separate CI and Release workflows for better clarity', 55dd37b 'ci: remove codeql workflow', c6bad91 'feat: implement dynamic versioning with git metadata'; files fancontrol/IIOProvider.h, fancontrol/MockIOProvider.h, .github/workflows/{ci.yml,release.yml}",
+          "effort": "n/a — parity (CI, tests) or out-of-scope (xmake)."
+        },
+        {
+          "feature": "C++ modernization layer: spdlog/std::format logging, std::stop_token worker, JSON config, config caching",
+          "detail": "Logging unified onto spdlog with std::format and auto-flush; worker thread converted to cooperative cancellation via std::stop_token; ConfigManager gained JSON support alongside INI; Apr 2026 follow-up added config caching with an m_configChanged flag, simplified sensor retry to single-sample+retry, and fixed an ImGui render crash by seeding SmoothTemps. All dependency- or architecture-bound; our INI + lightweight logging (EM_REPLACESEL + in-memory tail) is intentionally smaller.",
+          "adoptable": false,
+          "evidence": "Commits 65c44eb 'Refactor fancontrol to use std::format ... integrate spdlog for logging', 866f7f9 'refactor: Update WorkerThread to use std::stop_token for cooperative cancellation', ce78975 'feat: Add JSON support to ConfigManager and refactor application structure', 23165a5 'Core optimizations; UI crash fix; cleanup' (https://github.com/Tinnci/TPFanCtrl2/commit/23165a5, 28 files, +840/-5586)",
+          "effort": "n/a — dependency-driven; contrary to no-bloat goal."
+        }
+      ]
+    },
+    {
+      "fork": "FanDjango/TPFanCtrl2",
+      "ahead": 19,
+      "summary": "FanDjango/TPFanCtrl2 is the de-facto active maintenance fork of TPFanCtrl2; its author is also an upstream collaborator, so the 19-commits-ahead `main` branch differs from upstream by almost nothing (log-message wording, version strings 2.3.3->2.3.4, README model confirmations for P1 Gen7/Z16 Gen2, vcxproj SDK version) because the lid open/close feature developed here was merged upstream. The real fork-exclusive work lives on version branches 2.3.5-2.3.14, published as 'early beta' releases V2.3.5-V2.3.13-beta: power/suspend-aware fan-mode management (configurable LidClosedMode -> PowerSuspendMode, APM suspend/resume handling, Modern Standby S0 detection via Windows event-log subscription, 10s EC-access deferral after S0 resume), a SingleFan option, a fan ramp/hysteresis rework, and an EC port-autodetect/hardening pass in portio.cpp. Commit messages on these branches are mostly 'c'/'v', so the diffs (verified via a local clone of the fork's branches) are the real evidence.",
+      "notable": [
+        {
+          "feature": "Lid open/close automatic fan-mode switch",
+          "detail": "RegisterPowerSettingNotification(GUID_LIDSWITCH_STATE_CHANGE) + WM_POWERBROADCAST/PBT_POWERSETTINGCHANGE handler: on lid close save CurrentMode and switch to BIOS mode; on lid open restore the saved mode. Developed in this fork, later merged into upstream. Our fork already has the identical mechanism (fancontrol.x/fancontrol.cpp lines 46, 309, 3467-3490).",
+          "adoptable": false,
+          "effort": "n/a - already present",
+          "evidence": "Commits https://github.com/FanDjango/TPFanCtrl2/commit/70522be (\"lid\": adds DEFINE_GUID + RegisterPowerSettingNotification + WM_POWERBROADCAST handler) and https://github.com/FanDjango/TPFanCtrl2/commit/8d4997f (\"Fix previous mode\": adds previousModeBeforeLidClose, restores it instead of hardcoded mode 2); 418455d (\"fixup\") removed a duplicate handler after upstream merge. Verified present in our tree at C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fancontrol.cpp:3467-3490."
+        },
+        {
+          "feature": "PowerSuspendMode: configurable lid/suspend fan behavior + APM suspend/resume handling",
+          "detail": "Ini parameter (evolved from LidClosedMode introduced on branch 2.3.5, misc.cpp:294 `LidClosedMode=` parse) selecting what happens on lid close AND on PBT_APMSUSPEND/PBT_APMRESUMEAUTOMATIC: 0=disabled, 1=BIOS mode (save+restore previous mode), 2=keep current mode, 3=manual mode + fans OFF (SetFan 0x00), 4=fans off on any suspend with 5s settle before restoring saved mode on resume. Our fork has zero WM_POWERBROADCAST suspend/resume handling (grep for PBT_APMSUSPEND/PBT_APMRESUME finds nothing) and our lid behavior is hardcoded to BIOS mode. Pure Win32, no frameworks. Relevant to our machine's thermal-trip history: today our app does nothing across sleep transitions.",
+          "adoptable": true,
+          "effort": "~100-150 lines across fancontrol.cpp (WM_POWERBROADCAST cases), fancontrol.h (savedMode/isPowerSuspendState members), misc.cpp (ini parse) + our Settings dialog",
+          "evidence": "Branch 2.3.12 head 34accb8 (https://github.com/FanDjango/TPFanCtrl2/tree/2.3.12); verified diff origin/2.3.11..origin/2.3.12 in fancontrol/fancontrol.cpp shows PBT_APMSUSPEND -> savedMode=CurrentMode, PowerSuspendMode==4 -> SetFan(...,0x00), PBT_APMRESUMEAUTOMATIC -> Sleep(5000) + ModeToDialog(savedMode). Release notes https://github.com/FanDjango/TPFanCtrl2/releases/tag/V2.3.12: \"PowerSuspendMode ... (1) BIOS Mode ... (3) Manual Mode: switch to manual mode and turn off the fans (4) ... Turn fans off when suspend power events occur\"; LidClosedMode parse verified at origin/2.3.5:fancontrol/misc.cpp:294."
+        },
+        {
+          "feature": "Modern Standby (S0) entry/exit detection via Windows event-log subscription (ModernS0Mode)",
+          "detail": "Because Modern Standby does not deliver classic suspend messages reliably, the fork subscribes with EvtSubscribe (wevtapi.lib) to the System channel query *[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=506 or EventID=507)]] (506=S0 entry, 507=exit). A static EventLogCallback renders the event XML (EvtRender), string-searches the EventID, and on entry saves CurrentMode and applies ModernS0Mode (0=disabled default, 1=BIOS, 2=keep, 3=manual+fans off); on exit restores the saved mode. Plain Win32 API, ~120 lines, fits a tiny app. Our P15G2 is a Modern Standby machine and our fork has no S0 awareness at all (grep ModernS0/GUID_CONSOLE_DISPLAY_STATE: no matches). Caution when porting: the callback runs on an EvtSubscribe worker thread, so EC writes must go through our existing EC mutex, and blocking Sleeps in the callback should be avoided/marshalled to the UI thread.",
+          "adoptable": true,
+          "effort": "~120-150 lines in fancontrol.cpp/.h + misc.cpp ini parse + link wevtapi.lib",
+          "evidence": "Branch 2.3.12 head 34accb8 (https://github.com/FanDjango/TPFanCtrl2/tree/2.3.12); verified diff origin/2.3.11..origin/2.3.12 adds #include <winevt.h>, #pragma comment(lib, \"wevtapi.lib\"), EvtSubscribe call with the quoted Kernel-Power 506/507 query, FANCONTROL::EventLogCallback and HandleModernStandbyEvent with \"Detected Modern S0 Entry\"/\"Exit\" traces. Release notes https://github.com/FanDjango/TPFanCtrl2/releases/tag/V2.3.12: \"Monitor 'Modern S0' events in a similar fashion as Lid Open/Close events\"."
+        },
+        {
+          "feature": "10-second EC access deferral after Modern S0 exit",
+          "detail": "On detecting Modern S0 exit (Kernel-Power EventID 507) the app traces \"Detected Modern S0 Exit, defer access to EC (10s)\" and Sleep(10000) before touching the EC, because the embedded controller can return garbage or NAK right after resume. A tiny safety guard squarely in our fork's safety-guard theme; we have no resume-side EC guard. (Implementation caveat: their Sleep blocks the event callback thread - we would gate our poll timer instead.)",
+          "adoptable": true,
+          "effort": "~5-15 lines once S0 detection (item above) exists",
+          "evidence": "Branch 2.3.13 head e886f05 (https://github.com/FanDjango/TPFanCtrl2/tree/2.3.13), verified in tree at origin/2.3.13:fancontrol/fancontrol.cpp:440-441: `this->Trace(\"Detected Modern S0 Exit, defer access to EC (10s)\"); ::Sleep(10000);`. Release V2.3.13-beta notes: \"10s delay before accessing EC when coming out of Modern S0\"."
+        },
+        {
+          "feature": "SingleFan=1 ini option for single-fan models",
+          "detail": "Ini flag parsed in misc.cpp (`SingleFan=`); when set, SetFan skips the fan2 select/write/verify sequence (fan2_ok forced true) and the version string becomes \"Dual/Single Fan\". Broadens device compatibility for the fork's general audience. Irrelevant to our purpose-built dual-fan P15G2 fork.",
+          "adoptable": false,
+          "effort": "~50 lines",
+          "evidence": "Commit 3586df26023e29eeaf85eb83c854b0bb3c192e51 \"SingleFan option\" (branch 2.3.7, https://github.com/FanDjango/TPFanCtrl2/tree/2.3.7): verified diff adds `SingleFan = false` member, misc.cpp `_strnicmp(buf, \"SingleFan=\", 10)` parse, fanstuff.cpp `if (!SingleFan)` guard around fan2 writes. Release V2.3.7 notes: \"Added SingleFan mode for laptops with only one fan\"."
+        },
+        {
+          "feature": "Smart fan-curve ramp up/down + hysteresis rework",
+          "detail": "Replaces upstream's stateful \"hyst zone\" check (LastSmartLevel anchor compared against newLevel.temp +/- hyst) by folding hysteresis directly into level selection: ramp-up requires MaxTemp >= level.temp + hystUp, ramp-down requires MaxTemp <= level.temp - hystDown; commit 743bd80 then removes LastSmartLevel entirely. Cleaner and removes the documented foot-gun \"DO NOT HAVE HYSTERESIS OVERLAP WITH FAN TEMPS IN CONFIG!\". Not adoptable: our fork already has its own ramp-up/ramp-down + hysteresis algorithm with a LastSmartLevel anchor and dedicated unit tests (fancontrol.x/fanstuff.cpp:430-471 referencing tests/fanlogic_tests.cpp); swapping algorithms would discard tested behavior for no functional gain.",
+          "adoptable": false,
+          "effort": "~60 lines in fanstuff.cpp if ever wanted",
+          "evidence": "Commits aca7d516947a6e822acc769aede953320aa2af2c \"Improve Ramp Up/Down logic\" (branch 2.3.8) and 743bd80db720d7b7fe7ae4a2aca05d8b204dfb02 \"Remove lastSmartLevel\" (branch 2.3.9 head); diffs verified locally showing `this->SmartLevels[i].temp + this->SmartLevels[i].hystUp` ramp-up and `- hystDown` ramp-down conditions. Release notes V2.3.8 \"Improved fan ramp up and ramp down control logic\", V2.3.9 \"Quick fix improving hysteresis handling\". Our equivalent: C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fanstuff.cpp:430-471."
+        },
+        {
+          "feature": "EC port-layout auto-detection and EC access hardening (portio.cpp rework)",
+          "detail": "Net +363/-96 in portio.cpp: documents the ACPI EC command set with spec links, defines an EC_PORT_LAYOUTS table {0x1604/0x1600 \"ACPI_EC_TYPE1\", 0x66/0x62 \"ACPI_EC_TYPE2\"} and \"attempts to auto-detect which port layout is present by trying one, then the other if the first fails\", adds BURST/SCI_EVT/SMI_EVT status-bit constants, RECOVERY_DRAIN_READS=8 recovery-drain logic, and a STRICT_EC_READ_OBF_HANDLING switch. Notably risky: their own V2.3.10 with this rework was \"superseded due to reported issues with embedded controller access changes\" and refined in 2.3.11. Not adoptable: our fork targets one fixed machine (P15G2, known EC ports) and our prior analysis found porting EC-layer changes regresses our hardened implementation.",
+          "adoptable": false,
+          "effort": "~400 lines, 1 file",
+          "evidence": "Verified local diff origin/2.3.9..origin/2.3.10..origin/2.3.11 (branch heads 743bd80 -> 6853879 -> 7c46d06, https://github.com/FanDjango/TPFanCtrl2/tree/2.3.11), fancontrol/portio.cpp net +363/-96 with quoted comment \"This code attempts to auto-detect which port layout is present by trying one, then the other if the first fails.\" Release notes V2.3.10/V2.3.11 at https://github.com/FanDjango/TPFanCtrl2/releases confirm the supersession."
+        },
+        {
+          "feature": "Unreleased 2.3.14 WIP: PollECByte poll-verify in SetFan + strcmp bug fix",
+          "detail": "Refactors SetFan to a new `bool PollECByte(char offset, char* out, int expected, int timeoutMs)` that polls the EC fan register until it reads back the expected value (200ms timeout) instead of fixed Sleep(100) read-verify, cuts the retry backoff 300ms->100ms, and fixes a latent upstream bug where `source == \"Smart\"` compared pointers instead of strings. Not adoptable: our SetFan already does verify-and-retry with deliberate 100ms EC settle waits (commented as required, fanstuff.cpp:499-535) and we already use strcmp (fanstuff.cpp:490); this is unreleased single-commit WIP and an EC-timing change we have reason not to port.",
+          "adoptable": false,
+          "effort": "~70 lines in fanstuff.cpp + header decl",
+          "evidence": "Commit d8280869b91e50e694891e2b1d5338bb958ea4c3 (\"c\", sole commit on branch 2.3.14, dated 2026-05-06 - the 'pushed 2026-05' activity): verified diff adds PollECByte declaration and `strcmp(source, \"Smart\") == 0 // fix: was pointer compare`. Our code verified clean at C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fanstuff.cpp:490."
+        },
+        {
+          "feature": "Hardware support confirmations (README only)",
+          "detail": "README confirmed-support list extended with P1 Gen7 and Z16 Gen2 based on user reports; plus pointers to the fork's own beta releases. Documentation only - useful as field evidence that the common EC layout covers these models, no code to adopt.",
+          "adoptable": false,
+          "effort": "n/a",
+          "evidence": "Commits https://github.com/FanDjango/TPFanCtrl2/commit/ec0f304 \"Update confirmed support list in README - Added support for P1 Gen7\" and 17bbb4b \"Update README.md\" (Z16 Gen2, verified in net compare diff Shuzhengz:main...FanDjango:main which shows README + log-wording + version-string changes as the only main-branch deltas)."
+        }
+      ]
+    },
+    {
+      "fork": "ghubliming/TPFanCtrl2_P16s",
+      "ahead": 5,
+      "summary": "ghubliming/TPFanCtrl2_P16s is a config-and-binary repackaging of upstream TPFanCtrl2 (forked at upstream 2.2.1, commit 02761cf) for the ThinkPad P16s. Its 5 commits touch no C++ source at all: they add a P16s-tuned TPFanControl.ini, remove *.exe from .gitignore so a 1.32 MB prebuilt fancontrol.exe can be committed under exe_file_build_for_p16s/, add one README line, and (June 2026) tweak two ini values. There is no new hardware support, EC logic, fix, or build/CI work to adopt.",
+      "notable": [
+        {
+          "feature": "P16s-tuned configuration file (no code changes)",
+          "detail": "Adds a 300-line TPFanControl.ini tuned for the P16s: Active=0 (defaults to BIOS mode, per the README line 'Change ini to default BIOS mode, and build exe for TP P16s'), ManModeExit=78, IgnoreSensors=no5 / SensorName5=no5 to drop a bogus sensor from the max calc, IconLevels=65 75 80, ShowBiasedTemps=1, plus the standard two smart-mode level tables. The 'P16s adaptation' is entirely these stock-upstream config knobs — no EC register, dual-fan, or sensor-code changes. eeda428 then deleted the root and fancontrol/ copies of the ini (plus a stray res/RCa14648 temp file) and 65f1a38 re-added the ini under exe_file_build_for_p16s/.",
+          "adoptable": false,
+          "evidence": "https://github.com/ghubliming/TPFanCtrl2_P16s/commit/ca9890a 'Create TPFanControl.ini'; https://github.com/ghubliming/TPFanCtrl2_P16s/commit/eeda428 'default to BIOS mode, exe works' (600 deletions, 0 additions: TPFanControl.ini, fancontrol/TPFanControl.ini, fancontrol/res/RCa14648); https://github.com/ghubliming/TPFanCtrl2_P16s/commit/b5ba0f5 'Update README.md' adds '## Change ini to default BIOS mode, and build exe for TP P16s'",
+          "effort": "N/A - config values for a different machine; our fork already has sensor ignore lists and in-app settings"
+        },
+        {
+          "feature": "Prebuilt fancontrol.exe committed to the repo",
+          "detail": "Commit 65f1a38 removes the '*.exe' line from .gitignore and commits exe_file_build_for_p16s/fancontrol.exe (1.32 MB binary built from unmodified upstream 2.2.1 source) alongside the tuned ini, so P16s users can download a working build without compiling. This is distribution convenience, not a feature; committing binaries to git is also something we deliberately avoid (we use tagged releases).",
+          "adoptable": false,
+          "evidence": "https://github.com/ghubliming/TPFanCtrl2_P16s/commit/65f1a38 'exe uploaded' (.gitignore -1 line '*.exe'; +exe_file_build_for_p16s/TPFanControl.ini 300 lines; +exe_file_build_for_p16s/fancontrol.exe binary)",
+          "effort": "N/A"
+        },
+        {
+          "feature": "June 2026 ini tweak: louder startup manual speed, later manual-mode exit",
+          "detail": "The only recent activity (the '5 commits ahead, pushed 2026-06' signal) is a 2-line config edit in exe_file_build_for_p16s/TPFanControl.ini: ManFanSpeed 0 -> 7 (manual mode now starts at full fan level instead of fan-off) and ManModeExit 78 -> 100 (effectively never auto-exits manual mode on temperature, since 100 C is at/above trip). These are personal preference values using existing upstream parameters (ManModeExit itself is upstream FanDjango code, commit e1189dd, already in the base we track); nothing new to port.",
+          "adoptable": false,
+          "evidence": "https://github.com/ghubliming/TPFanCtrl2_P16s/commit/6b0ddb7 'Update TPFanControl.ini' — diff: '- ManFanSpeed=0' -> '+ ManFanSpeed=7'; '- ManModeExit=78 ...' -> '+ ManModeExit=100 ...'",
+          "effort": "N/A"
+        }
+      ]
+    },
+    {
+      "fork": "withmorten/TPFanCtrl2",
+      "ahead": 4,
+      "summary": "withmorten/TPFanCtrl2 is a small personal fork, 4 commits ahead of upstream (Dec 2025 - Jan 2026), all by withmorten, focused on manual-fan-mode quality of life. It adds two-way Manual/Smart hysteresis (auto-exit Manual on high temp, auto-return when cool again), de-hardcodes several behaviors into config keys (exit target mode, lid-close handling, Fahrenheit), filters a bogus 0x77 EC sensor reading, and consolidates the duplicated stay-on-top dialog template into one template with a runtime WS_EX_TOPMOST toggle.",
+      "notable": [
+        {
+          "feature": "Manual-mode hysteresis: auto-return to Manual when temp drops (ManModeEntryLo) + configurable exit target mode (ManModeExitModeLo)",
+          "detail": "Upstream/our fork only has one-way ManModeExit: Manual(3) -> Smart(2) when MaxTemp exceeds threshold (our fancontrol.cpp:3174-3177 hardcodes ModeToDialog(2)). The fork adds the return path and makes the exit target configurable. Verified final code in fork's fanstuff.cpp: `if (CurrentMode == 3 && ManModeExitLo && MaxTemp > ManModeExitLoInternal) CurrentMode = ManModeExitModeLo; else if (CurrentMode == ManModeExitModeLo && ManModeEntryLo && MaxTemp <= ManModeEntryLoInternal) CurrentMode = 3;`. Both branches gated on the config key being nonzero (defaults: ManModeExitModeLo=2, ManModeEntryLo=80); Fahrenheit/Celsius conversion handled like ManModeExit. Caveat if porting: re-entry fires whenever CurrentMode equals the exit-target mode and temp is low - it does not track whether the exit actually happened, so a user who manually selects Smart gets pulled into Manual once cool. Final key names carry a 'Lo' suffix (ManFanSpeedLo/ManModeExitLo/ManModeEntryLo/ManModeExitModeLo) from the rename commit 66e6ab7, which is otherwise a pure rename plus vcxproj.user debugger noise.",
+          "adoptable": true,
+          "effort": "~30-50 lines across fanstuff.cpp/fancontrol.cpp/fancontrol.h/misc.cpp (config parse + defaults + F/C conversion + mode check); fix the re-entry gating while porting",
+          "evidence": "https://github.com/withmorten/TPFanCtrl2/commit/b53e237 ('fix dialog being declared twice, add changing back to manual mode when temperature is lower again...'), https://github.com/withmorten/TPFanCtrl2/commit/202d44a ('add default values for new config values, add ManModeEntry'), https://github.com/withmorten/TPFanCtrl2/commit/66e6ab7 ('rename all temp mode exit/entry to Lo'); verified in fork's fancontrol/fanstuff.cpp on main"
+        },
+        {
+          "feature": "Filter bogus 0x77 sensor reading",
+          "detail": "Adds 0x77 to the garbage-value filter in sensor validation: `if (Sensors[i] != 0x80 && Sensors[i] != 0x77 && Sensors[i] != 0x00 && ...)` (verified in fork's fanstuff.cpp). Some ThinkPad ECs return 0x77 as a not-implemented/garbage marker, which otherwise shows as a phantom 119 C reading. Our equivalent line at fancontrol.x\\fanstuff.cpp:103 filters only 0x80 and 0x00 (plus our per-sensor ignore list, which can mask a sensor but not a value pattern). Caveat: 0x77 = 119 decimal, so a sensor genuinely at 119 C would be masked from MaxTemp; on the P15G2 that interacts with our 0x40 thermal fail-safe threshold logic, so sanity-check which sensors on this machine can ever legitimately read 119 before adopting.",
+          "adoptable": true,
+          "effort": "1 line in fanstuff.cpp:103",
+          "evidence": "https://github.com/withmorten/TPFanCtrl2/commit/b53e237 ('...fix 0x77 being incorrectly reported by sensor'); quoted filter line verified in fork's fancontrol/fanstuff.cpp on main"
+        },
+        {
+          "feature": "Single dialog template with runtime WS_EX_TOPMOST toggle (fixes 'dialog declared twice')",
+          "detail": "Upstream keeps near-duplicate dialog templates in the .rc differing only by EXSTYLE WS_EX_TOPMOST|WS_EX_TOOLWINDOW, selected by StayOnTop at CreateDialogParam time. The fork deletes the duplicate template and instead creates one dialog (resource 9000), then applies WS_EX_TOPMOST|WS_EX_TOOLWINDOW via GetWindowLongPtr/SetWindowLongPtr plus SetWindowPos(HWND_TOPMOST) when StayOnTop is set. We still have the duplicated-template debt: misc.cpp:698-706 and fancontrol.cpp:323-331 pick between templates, res/FanControl.rc keeps 9000/9002 and 9001/9003 pairs in sync (flagged in our own docs/gui-modernization-plan.json as maintenance debt, with .rc comments warning to keep controls 8320-8328 in sync). We already toggle topmost at runtime when the Settings checkbox changes (fancontrol.cpp:4109-4110), so adopting this just finishes the job and lets us delete two templates. Mind WS_EX_TOOLWINDOW (taskbar presence) when consolidating.",
+          "adoptable": true,
+          "effort": "Delete 2 duplicate templates (~100 .rc lines), simplify 2 CreateDialogParam call sites, ~5 lines of style application",
+          "evidence": "https://github.com/withmorten/TPFanCtrl2/commit/b53e237 ('fix dialog being declared twice...'); our duplicates at fancontrol.x\\misc.cpp:698-706, fancontrol.x\\fancontrol.cpp:323-331, fancontrol.x\\res\\FanControl.rc:29,84"
+        },
+        {
+          "feature": "IgnoreLidClose config option",
+          "detail": "New ini key IgnoreLidClose= (default 0) that skips RegisterPowerSettingNotification(GUID_LIDSWITCH_STATE_CHANGE) entirely when set, so the app never reacts to lid events. We always register (fancontrol.x\\fancontrol.cpp:309,361) and switch/restore mode around lid close (fancontrol.cpp:3473-3488) with no opt-out. Genuinely useful for clamshell/docked users who run lid-closed with external monitors and do not want the fan mode changed on lid close.",
+          "adoptable": true,
+          "effort": "~6-10 lines: one config key in misc.cpp parse + write-default, guard the two RegisterPowerSettingNotification call sites",
+          "evidence": "https://github.com/withmorten/TPFanCtrl2/commit/254575d ('add more options to avoid less on hardcoding behaviour'), default added in https://github.com/withmorten/TPFanCtrl2/commit/202d44a"
+        },
+        {
+          "feature": "Explicit Fahrenheit= config key (instead of only the >=80 auto-detect)",
+          "detail": "Adds a Fahrenheit= ini key so the display unit is set explicitly rather than inferred from SmartLevels[0].temp >= 80. We still rely solely on the auto-detect (fancontrol.x\\misc.cpp:811: `if (this->SmartLevels[0].temp >= 80) Fahrenheit = true;`) with save-side round-trip logic deliberately built around it (misc.cpp comments, README). Minor UX win for users whose first smart level is legitimately >=80 C; needs care to keep our ini save round-trip consistent if the explicit key disagrees with the curve-based detection.",
+          "adoptable": true,
+          "effort": "~10 lines in misc.cpp (parse + default) plus a pass over the save/round-trip logic",
+          "evidence": "https://github.com/withmorten/TPFanCtrl2/commit/254575d ('add more options to avoid less on hardcoding behaviour') - adds 'Fahrenheit=' parsing and removes reliance on the >=80 heuristic"
+        }
+      ]
+    },
+    {
+      "fork": "mikooomich/TPFanCtrl2",
+      "ahead": 2,
+      "summary": "mikooomich/TPFanCtrl2 (branch x1e-gen2) is a personal tuning fork for the ThinkPad X1 Extreme Gen 2. Its two substantive features — configurable per-level hysteresis for Smart mode and temperature-range-gated sensor offsets — were contributed back to upstream via PRs (which is why the branch is only 2 commits ahead), and both are already implemented (and unit-tested) in our fork. The actual 2-commit divergence is just a vcxproj build pin (Win10 SDK + C++17/C17) and a README documenting an X1E-Gen2-tuned config shipped only as a release artifact.",
+      "notable": [
+        {
+          "feature": "Configurable per-level hysteresis for Smart fan control",
+          "detail": "Extends Level= ini syntax from 'temp fan' to 'temp fan hystUp hystDown'; SMARTENTRY structs gain hystUp/hystDown fields, fanstuff.cpp tracks LastSmartLevel and skips level changes while temperature is inside the rising/cooling hysteresis band, misc.cpp parses 4 params via sscanf_s. Reduces fan pulsation. This commit was merged into upstream main (hence not in the 2-commit divergence), and our fork already has an equivalent, refactored implementation in fanlogic.h/fanstuff.cpp with unit tests (tests/fanlogic_tests.cpp), including hysteresis-anchor reset on profile switch.",
+          "adoptable": false,
+          "evidence": "Commit 059e3f7 'Configurable hysteresis values for smart fan control' (https://github.com/mikooomich/TPFanCtrl2/commit/059e3f7); diff touches fancontrol/TPFanControl.ini, fancontrol.h (int hystUp, hystDown), fanstuff.cpp (LastSmartLevel = -1 tracking), misc.cpp. Local parity: C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fanlogic.h lines 46-94, tests\\fanlogic_tests.cpp",
+          "effort": "n/a - already present in our fork"
+        },
+        {
+          "feature": "Configurable sensor-offset temperature range (offset disable window)",
+          "detail": "Changes SensorOffsetX= from a single int to 'offset min max': replaces int SensorOffset[16] with struct SENSOROFFSET { int offs, hystMin, hystMax; }; the offset is zeroed when the raw reading falls inside [hystMin, hystMax], letting e.g. a GPU offset apply only below a threshold to avoid throttling-zone distortion. Also merged into upstream main. Our fork already implements the same window ('per-sensor hysteresis window (offset disabled inside it)').",
+          "adoptable": false,
+          "evidence": "Commit 5bf6f5b 'Configurable sensor offset range' (https://github.com/mikooomich/TPFanCtrl2/commit/5bf6f5b); diff: fancontrol.h struct SENSOROFFSET { int offs, hystMin, hystMax; }, misc.cpp sscanf_s(buf + 14, \"%d %d %d\", ...). Local parity: C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fancontrol.h line 379, fanstuff.cpp line 68, fanlogic.h line 29",
+          "effort": "n/a - already present in our fork"
+        },
+        {
+          "feature": "Build pin: Windows 10 SDK target + C++17/C17 language standard (1 of the 2 ahead commits)",
+          "detail": "Adds three lines to fancontrol/fancontrol.vcxproj Release config: <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>, <LanguageStandard>stdcpp17</LanguageStandard>, <LanguageStandard_C>stdc17</LanguageStandard_C>. Pure build-config modernization so the project loads/builds on current VS. Our fork already targets SDK 10.0.26100.0 with PlatformToolset v145 and builds warning-free, so this adds nothing; explicitly pinning stdcpp17 would be a cosmetic 1-2 line vcxproj tweak at most.",
+          "adoptable": false,
+          "evidence": "Commit 1fe5587 'DMN: Weh' (https://github.com/mikooomich/TPFanCtrl2/commit/1fe5587), sole file fancontrol/fancontrol.vcxproj, +3/-0. Our config: C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fancontrol.vcxproj lines 17 (10.0.26100.0) and 22 (v145)",
+          "effort": "1-3 lines if ever desired"
+        },
+        {
+          "feature": "X1 Extreme Gen 2 tuned fan-curve config shipped as release artifact (2nd of the 2 ahead commits)",
+          "detail": "README-only commit adding a 'Notable Changes' section: documents hysteresis + GPU temp-offset tuning to reduce throttling/fan pulsation, warns the tuning assumes ~53W CPU power limit, and tells users to rename a provided TPFanControl.ini_x1e_g2 to TPFanControl.ini. Verified the ini_x1e_g2 file exists nowhere in the source tree (checked repo root and fancontrol/) — it is distributed only in GitHub release artifacts. Hardware-specific tuning for a different machine (X1E G2 vs our P15G2 with dual-fan support and our own curves); not applicable to us.",
+          "adoptable": false,
+          "evidence": "Commit c8cd705 'Update README.md' (https://github.com/mikooomich/TPFanCtrl2/commit/c8cd705), README.md +12/-0, quotes: 'This will not fix Lenovo's abysmal thermal design', instructs renaming TPFanControl.ini_x1e_g2; tree listings at https://github.com/mikooomich/TPFanCtrl2/tree/x1e-gen2 and /tree/x1e-gen2/fancontrol confirm the file is not in the repo",
+          "effort": "n/a - hardware-specific config, not code"
+        }
+      ]
+    },
+    {
+      "fork": "addohm/TPFanCtrl2",
+      "ahead": 2,
+      "summary": "addohm/TPFanCtrl2 is upstream Shuzhengz/TPFanCtrl2 (synced through upstream's Oct 2025 state, v2.3.6 era) plus exactly two fork-only commits, both pushed 2025-10-25. Neither touches C++ source, hardware support, or the build; they add standalone PowerShell ops scripts: a Windows Task Scheduler watchdog that periodically checks the TPFanControl process and restarts it if it has died, and a matching cleanup/uninstall script. There is nothing else to evaluate — the compare view shows only these 2 commits / 2 files (~499 lines of PowerShell).",
+      "notable": [
+        {
+          "feature": "Process watchdog via Windows Task Scheduler (TPFC_Task_Monitor_Create.ps1)",
+          "detail": "357-line PowerShell installer that generates a sidecar monitor script (TPFC_Monitor.ps1) and registers a scheduled task to run it. Parameters: ProcessName (default TPFanControl), MaxRetries (2), RetryDelaySeconds (5), CheckIntervalMinutes (1). The generated monitor checks whether TPFanControl.exe is running, retries with delay, relaunches it if dead, logs with timestamps to a temp file, and shows a Windows Forms error popup on failure. Task registration uses Register-ScheduledTask cmdlets (logon trigger + repeating interval trigger, SYSTEM/highest privileges, auto-restart 3x) with a schtasks+XML fallback. Addresses a gap our fork has: if our app crashes while holding a manual EC fan level, nothing restarts it, and EC control stays stale until the firmware watchdog times out. Caveats if adopting: running the task as SYSTEM at highest privileges means the relaunched GUI may land in the wrong session/without the user's settings dir, and the same goal can be met with a much simpler per-user scheduled task; consider rewriting as a ~40-line script or task XML rather than porting verbatim.",
+          "adoptable": true,
+          "effort": "Copy-as-is: 2 files, ~499 lines of PowerShell, zero changes to the C++ binary. A trimmed per-user rewrite is ~40-80 lines.",
+          "evidence": "Commit 7c5518d0e5e3940c91af608c5422189992d4a9c8 \"Add TPFC Monitor Setup Script\" adding Scripts/TPFC_Task_Monitor_Create.ps1 (+357), https://github.com/addohm/TPFanCtrl2/commit/7c5518d0e5e3940c91af608c5422189992d4a9c8; compare view https://github.com/Shuzhengz/TPFanCtrl2/compare/main...addohm:TPFanCtrl2:main shows it as 1 of only 2 fork commits (PR-style title \"Scripts to run as task and check task\")"
+        },
+        {
+          "feature": "Watchdog uninstaller (TPFC_Task_Monitor_Delete.ps1)",
+          "detail": "142-line PowerShell cleanup script: removes the scheduled task (Unregister-ScheduledTask with schtasks fallback), deletes the generated TPFC_Monitor.ps1, and cleans up the temp log file. Parameters TaskName (default \"TPFC Monitor\"), MonitorScriptName, and -Force to skip confirmation; prints a colored summary of what was removed. Only meaningful as the companion to the watchdog above — adopt together or not at all.",
+          "adoptable": false,
+          "effort": "Copy-as-is alongside the create script: 1 file, 142 lines.",
+          "evidence": "Commit 5e575ee8ae38e0d9dac1e8cdf5daa3b3d235f932 \"Add TPFC Task Monitor Cleanup Script\" adding Scripts/TPFC_Task_Monitor_Delete.ps1 (+142), https://github.com/addohm/TPFanCtrl2/commit/5e575ee8ae38e0d9dac1e8cdf5daa3b3d235f932"
+        }
+      ]
+    },
+    {
+      "fork": "BeteixZ/TPFanCtrl2",
+      "ahead": 1,
+      "summary": "BeteixZ/TPFanCtrl2 is a single-commit fork (10e3ab4, \"Localization.\", 2026-01-18) whose headline change is a full Simplified Chinese translation of the UI: every string in approot.cpp/fancontrol.cpp/fanstuff.cpp/misc.cpp plus the .rc dialogs/menu, switching resources to LANG_CHINESE + code_page 936 and the dialog font to MS Shell Dlg 9pt. The commit quietly bundles several real correctness fixes alongside the translation: constructor member-init fixes, a smart-curve config parsing index bug, dialog creation decoupled from ini-file presence, WM_INITDIALOG USERDATA wiring, an hPowerNotify lifecycle fix, and buffer enlargements (partly to fit multi-byte Chinese text). Most of those fixes are already present in our fork, but three small robustness gaps remain adoptable.",
+      "notable": [
+        {
+          "feature": "hPowerNotify lifecycle fix (NULL init + guarded unregister)",
+          "detail": "Initializes hPowerNotify(NULL) in the FANCONTROL constructor init list and null-checks it before UnregisterPowerSettingNotification in the destructor ('if (this->hPowerNotify) { Unregister...; = NULL; }'). OUR GAP: fancontrol.h:413 declares 'HPOWERNOTIFY hPowerNotify;' with no initializer and it is only ever assigned inside 'if (this->hwndDialog)' blocks; fancontrol.cpp:929 calls UnregisterPowerSettingNotification(this->hPowerNotify) unconditionally in the destructor. If the dialog is never created (missing ini with SlimDialog=0, or CreateDialogParam failure), we pass an uninitialized garbage handle to the API at exit (UB).",
+          "adoptable": true,
+          "effort": "2-3 lines (in-class '= NULL' in fancontrol.h + null guard at fancontrol.cpp:929)",
+          "evidence": "Commit 10e3ab4b54e8c20ea59fe5db711ab5fe19440403 ('Localization.') https://github.com/BeteixZ/TPFanCtrl2/commit/10e3ab4b54e8c20ea59fe5db711ab5fe19440403 — fancontrol.cpp hunks '+hPowerNotify(NULL),' and '+if (this->hPowerNotify) { ... UnregisterPowerSettingNotification(this->hPowerNotify); this->hPowerNotify = NULL; }' replacing bare 'UnregisterPowerSettingNotification(this->hPowerNotify);'"
+        },
+        {
+          "feature": "Main dialog created even when TPFanControl.ini is missing, plus CreateDialogParam failure reporting",
+          "detail": "Moves the two CreateDialogParam calls (templates 9000/9002) in ReadConfig out of the 'if (config file opened)' block so the main window is created regardless of ini presence, and adds an error MessageBox with GetLastError if CreateDialogParam returns NULL (and a second check in the constructor). OUR GAP: in C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\misc.cpp the CreateDialogParam calls (lines 698-710) are still inside the if(f) ini-found branch; the missing-ini else branch (lines 730-801) writes a default ini but does not create the dialog, so the very first run after deleting the ini is windowless (and tray-less, since the tray binds to hwndDialog) until restart. We also have no diagnostic if CreateDialogParam itself fails.",
+          "adoptable": true,
+          "effort": "~15 lines restructured in misc.cpp ReadConfig (move dialog creation + smart-level end markers out of the if(f) block, or re-open after writing defaults) + optional failure MessageBox",
+          "evidence": "Commit 10e3ab4b54e8c20ea59fe5db711ab5fe19440403 — misc.cpp hunk @@ -489,43 +488,51 @@: removes CreateDialogParam from inside the file-found block, re-adds it unconditionally, adds '+if (!this->hwndDialog) { DWORD err = GetLastError(); ... ::MessageBox(NULL, emsg, \"Error\", MB_ICONERROR); }'"
+        },
+        {
+          "feature": "BaseDlgProc wires the object pointer at WM_INITDIALOG",
+          "detail": "In WM_INITDIALOG, calls SetWindowLong(hwnd, GWL_USERDATA, mp2) and sets This->hwndDialog = hwnd, so the FANCONTROL pointer is valid for all messages sent during dialog creation (standard Win32 CreateDialogParam pattern). OUR GAP: our BaseDlgProc (fancontrol.cpp:2679-2698) only registers TaskbarCreated/UIPI filters at WM_INITDIALOG; GWLP_USERDATA is set after CreateDialogParam returns (fancontrol.cpp:298/347), so every message during creation (initial WM_CTLCOLOR*, WM_SIZE, WM_INITDIALOG itself) runs with This==NULL — our DlgProc even carries the comment 'placing code here will NOT work!' at WM_INITDIALOG. Optional robustness; our post-create InitThemeAndChrome repaint masks the visible effects today.",
+          "adoptable": true,
+          "effort": "~6 lines in BaseDlgProc (fancontrol.cpp:2679); can then drop the redundant post-create SetWindowLongPtr calls",
+          "evidence": "Commit 10e3ab4b54e8c20ea59fe5db711ab5fe19440403 — fancontrol.cpp hunk @@ -638,26 +644,23 @@: '+SetWindowLong(hwnd, GWL_USERDATA, mp2); +FANCONTROL* This = (FANCONTROL*)mp2; +if (This) { This->hwndDialog = hwnd; }' inside 'if (msg == WM_INITDIALOG)'"
+        },
+        {
+          "feature": "Longer configurable sensor names (3 -> 15 chars) and enlarged string buffers",
+          "detail": "Enlarges gSensorNames[17] entries from [4] to [16] and the SensorNameN= strncpy_s limits from 3 to 15 chars; also Title* 128->256, CurrentStatus/csv 256->512, MenuLabelSM1/SM2 32->64, obuf2/templist/templist2 doubled. Motivated by multi-byte Chinese labels, but the sensor-name part is a small standalone usability win (descriptive names like 'nvme0' instead of 3-letter codes). OUR STATE: still char gSensorNames[17][4] (fancontrol.h:170) with a 3-char strncpy_s cap (misc.cpp:660). Caveat if adopting: our fixed-width temps panel, tray text icon, and sparkline legend assume short labels, so longer names need a quick layout check.",
+          "adoptable": true,
+          "effort": "~5 lines (header array dim + one strncpy_s limit in our keyed loop) + UI alignment check",
+          "evidence": "Commit 10e3ab4b54e8c20ea59fe5db711ab5fe19440403 — fancontrol.h hunk '-char gSensorNames[17][4]; +char gSensorNames[17][16];' and misc.cpp hunks changing 'strncpy_s(this->gSensorNames[n], ..., buf + 12, 3)' to '..., 15)' for SensorName1-16"
+        },
+        {
+          "feature": "Smart curve 'level2=' hysteresis parsed into the wrong array index (upstream bug fix)",
+          "detail": "Upstream parsed 'level2=' lines as sscanf_s(..., &SmartLevels2[lcnt2].temp2, &SmartLevels2[lcnt2].fan2, &SmartLevels2[lcnt1].hystUp2, &SmartLevels2[lcnt1].hystDown2) — hysteresis values written using the other profile's counter (lcnt1). BeteixZ corrects both to lcnt2. WE ALREADY HAVE THIS FIX: our misc.cpp:447 uses lcnt2 for all four fields and additionally bounds-checks lcnt2 against ARRAYMAX. Do not port.",
+          "adoptable": false,
+          "effort": "n/a (already present)",
+          "evidence": "Commit 10e3ab4b54e8c20ea59fe5db711ab5fe19440403 — misc.cpp hunk @@ -149,7 +148,7 @@ changing 'SmartLevels2[lcnt1].hystUp2/hystDown2' to 'SmartLevels2[lcnt2]...'; our fix at C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\misc.cpp:447"
+        },
+        {
+          "feature": "Constructor member-init fixes: hinstapp(NULL)->hinstapp(hinstapp), isLidClosed(false), previousModeBeforeLidClose(-1); Trace() stack-usage reduction",
+          "detail": "Fixes upstream's constructor initializing the hinstapp member to NULL instead of the parameter, and adds initializers for the lid-close state members; also makes Trace()'s 16KB buffer static to cut per-call stack usage. WE ALREADY HAVE EQUIVALENTS: fancontrol.cpp:54 'hinstapp(hinstapp)', fancontrol.h:414-415 in-class 'isLidClosed = false; previousModeBeforeLidClose = -1', and our Trace() was rewritten around EM_REPLACESEL + an in-memory log tail with a critical section, superseding the static-buffer tweak. Do not port.",
+          "adoptable": false,
+          "effort": "n/a (already present / superseded)",
+          "evidence": "Commit 10e3ab4b54e8c20ea59fe5db711ab5fe19440403 — fancontrol.cpp hunk '-: hinstapp(NULL), +: hinstapp(hinstapp), +isLidClosed(false), +previousModeBeforeLidClose(-1)' and misc.cpp hunk '+static char trace[16384];' in FANCONTROL::Trace"
+        },
+        {
+          "feature": "Full Simplified Chinese localization",
+          "detail": "Translates every user-facing string (error boxes, service-install usage text, tray menu, balloon tips, lid open/close traces, fan state strings, all four dialog templates) to Simplified Chinese; switches fancontrol.rc from LANG_NEUTRAL/#pragma code_page(1252) to LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED/#pragma code_page(936); changes dialog font from 'MS Sans Serif' 8 to 'MS Shell Dlg' 9 and nudges control widths for CJK glyphs. Hardcoded source-level translation, not an i18n mechanism — nothing to adopt for our English-language fork (and our resources/strings have heavily diverged anyway).",
+          "adoptable": false,
+          "effort": "n/a",
+          "evidence": "Commit 10e3ab4b54e8c20ea59fe5db711ab5fe19440403 — res/fancontrol.rc hunk '-LANGUAGE LANG_NEUTRAL, SUBLANG_DEFAULT / -#pragma code_page(1252)' -> '+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED / +#pragma code_page(936)' plus translated string hunks across approot.cpp, fancontrol.cpp, fanstuff.cpp"
+        }
+      ]
+    },
+    {
+      "fork": "upstream PRs/issues",
+      "ahead": 0,
+      "summary": "Shuzhengz/TPFanCtrl2 is the actively maintained upstream of the ThinkPad fan utility (releases through v2.3.6, mostly driven by FanDjango); recent merged work is lid-close detection, hysteresis + conditional sensor offsets, ManModeExit, dual-fan display fixes, and README/device-support updates — all of which our fork already has or exceeds. The remaining substantive ideas in its PR/issue network are power-event handling (suspend/resume, docking), a recurring CJK degree-symbol encoding bug that also affects our ANSI build, an emergency-action-at-critical-temp request, and operational watchdog scripts.",
+      "notable": [
+        {
+          "feature": "Suspend/resume fan handling (PBT_APMSUSPEND/PBT_APMRESUMEAUTOMATIC)",
+          "detail": "Users report fans staying at manual/smart levels during S0 modern standby and sleep ('even when entering the S0 sleep state... the fan continues spinning'); request is: switch to BIOS mode (0x80) on suspend, restore previous mode and re-apply the fan level on resume (EC state can be reset by firmware after sleep). Upstream has NOT implemented it. Our fork handles only PBT_POWERSETTINGCHANGE for the lid (fancontrol.cpp:3467-3493) and has no suspend/resume branch — implementation is a near-clone of our existing lid handler inside the same WM_POWERBROADCAST case.",
+          "adoptable": true,
+          "effort": "~30-50 lines in the existing WM_POWERBROADCAST handler in C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fancontrol.cpp",
+          "evidence": "https://github.com/Shuzhengz/TPFanCtrl2/issues/94 ('Add fan control based on system suspend/resume events', open, enhancement: 'the system need stops the fan when entering suspend, and restores the previous fan settings upon resume') and https://github.com/Shuzhengz/TPFanCtrl2/issues/61 ('Fans run high on Sleep', X1 Yoga Gen 7: fans ramp to mid-high within minutes of entering sleep while BIOS mode only reaches level 1)"
+        },
+        {
+          "feature": "'Docking Mode' — opt-out toggle for lid-close -> BIOS-mode switch",
+          "detail": "Upstream merged lid-close detection (PR #86/#89: RegisterPowerSettingNotification + GUID_LIDSWITCH_STATE_CHANGE forces BIOS mode on lid close), then issue #93 asks for 'An option in settings to stop fan returning to BIOS mode when lid is closed' because docked users run lid-closed permanently and lose smart/manual control. Our fork inherited the same unconditional lid handler (fancontrol.cpp:3470-3490) and misc.cpp has no ini key guarding it — a docked P15G2 would silently drop to BIOS mode forever. Fix: one ini/Settings boolean checked before the lid branch.",
+          "adoptable": true,
+          "effort": "~10-20 lines (ini key in misc.cpp parser + guard in fancontrol.cpp + optional Settings checkbox)",
+          "evidence": "https://github.com/Shuzhengz/TPFanCtrl2/issues/93 ('Docking Mode', open enhancement by repo owner Shuzhengz: 'An option in settings to stop fan returning to BIOS mode when lid is closed', references #92); lid feature itself: https://github.com/Shuzhengz/TPFanCtrl2/pull/86 'Detect lid closing' (merged May 2, 2025)"
+        },
+        {
+          "feature": "Degree-symbol mojibake on CJK system locales (recurring bug, affects us)",
+          "detail": "On Simplified Chinese Windows (ANSI codepage 936) the '\\xb0' degree sign in ANSI strings renders as '?' — reported twice upstream (#105, 'just like in the case of #48'). Our fork is the same MBCS/ANSI build with \\xb0 in ~10 call sites, but we already centralized formatting in FormatTemp/TempUnit (misc.cpp:24-33), so the fix is mostly one place: emit the symbol via a Unicode path or fall back to plain 'C'/'F' when GetACP() != 1252. Remaining hardcoded sites: fancontrol.cpp:2204-2210, 2509, 4593/4598 and misc.cpp log lines 850-913.",
+          "adoptable": true,
+          "effort": "~20-40 lines across misc.cpp (formatter) plus ~8 hardcoded \\xb0 sites in fancontrol.cpp/misc.cpp",
+          "evidence": "https://github.com/Shuzhengz/TPFanCtrl2/issues/105 ('The display of Celsius in Chinese is abnormal', open: degree symbol displays as '?' under Simplified Chinese, recurring from issue #48); local confirmation: docs\\gui-modernization-plan.json notes 'degree sign as \\xb0 dependent on codepage 1252'"
+        },
+        {
+          "feature": "Emergency hibernate/shutdown option at critical temperature (+ audible alarm)",
+          "detail": "Open upstream request: 'add hibernate or shutdown mode option when temp = 95c example' plus a sound alarm at max temp. Upstream never implemented it. Our fork's fail-safe forces fan 0x40 above a threshold but takes no OS-level action if temperature keeps climbing — directly relevant to the thermal-trip instant power-off this dev P15G2 already suffered. Implementation: after MaxTemp stays above a configurable critical threshold for N poll cycles, MessageBeep/toast warning then SetSuspendState(TRUE,...) (hibernate, needs SE_SHUTDOWN_NAME privilege) as an opt-in ini setting.",
+          "adoptable": true,
+          "effort": "~40-80 lines in fanstuff.cpp fail-safe path + ini key in misc.cpp + powrprof.lib link",
+          "evidence": "https://github.com/Shuzhengz/TPFanCtrl2/issues/95 ('add hibernate or shutdown mode option when real temp = max temp', open enhancement, Aug 19 2025: 'add hibernate or shutdown mode option when temp = 95c example' and a sound alarm at max temp; no implementation activity)"
+        },
+        {
+          "feature": "Watchdog scheduled-task scripts (auto-restart if the app dies)",
+          "detail": "Open PR adds Scripts/TPFC_Task_Monitor_Create.ps1 and TPFC_Task_Monitor_Delete.ps1: generates a monitor script ('Monitors and restarts TPFanControl if not running. Checks every $IntervalMinutes minutes'), registers a Task Scheduler job with logon + interval triggers, retry/verification logic and schtasks fallback. Zero app-code bloat (pure scripts) and addresses the recurring 'Automatic startup not (fully) working' complaint (#65). For a fan-control app whose failure mode is fans stuck at a fixed level, an external watchdog has real safety value.",
+          "adoptable": true,
+          "effort": "2 PowerShell files (~150-250 lines total), copy-and-adapt from the PR; no C++ changes",
+          "evidence": "https://github.com/Shuzhengz/TPFanCtrl2/pull/107 ('Scripts to run as task and check task' by addohm, open since Oct 25 2025; adds Scripts/TPFC_Task_Monitor_Create.ps1 quoting 'Monitors and restarts TPFanControl if not running. Checks every $IntervalMinutes minutes.'); related complaint: https://github.com/Shuzhengz/TPFanCtrl2/issues/65"
+        },
+        {
+          "feature": "SecWinUptime boot-delay logic defeated by Windows Fast Startup",
+          "detail": "Upstream-documented flaw: SecWinUptime/SecStartDelay compares tick-count uptime, but 'this uptime IS NOT set to zero by a power off shutdown' when Fast Startup is enabled (power-on is a kernel-hibernation resume), so the EC-settling start delay is silently skipped on most real power-ons. Our fork has the identical logic on GetTickCount64 (fancontrol.cpp:428-460). Upstream's resolution is documentation (disable Fast Startup / shift+shutdown). Minimal adoption: add the caveat to TPFanControl.ini comments and README; optional code fix would compare wall-clock now minus real boot time instead of tick count.",
+          "adoptable": true,
+          "effort": "doc-only (a few ini/README lines); optional ~20-line code alternative",
+          "evidence": "https://github.com/Shuzhengz/TPFanCtrl2/issues/102 ('SecWinUptime logic fails on POWER ON windows boot if fast start feature is enabled', FanDjango, open, labeled documentation: 'this uptime IS NOT set to zero by a power off shutdown'; workaround quoted: 'A shutdown whilst pressing the shift-key will also shut down the system, bypassing the fast start feature')"
+        },
+        {
+          "feature": "Per-sensor thresholds / fully independent per-fan smart control (recurring ask, NOT recommended)",
+          "detail": "Recurring user request (#64, also #55 'manually control just one fan'): different temperature thresholds per sensor and independently controlled fans. Upstream never implemented per-sensor thresholds. Our fork already has independent dual curves (SmartLevels1/SmartLevels2, Level=/Level2= ini lines, fancontrol.h:82-88) which covers the per-fan half; per-sensor thresholds would be a large config/UI surface for a tiny app — flagging as a demand signal only.",
+          "adoptable": false,
+          "effort": "large (config grammar + UI + control loop rework) — disproportionate for this app",
+          "evidence": "https://github.com/Shuzhengz/TPFanCtrl2/issues/64 ('Set different thresholds for different sensors (and ideally separately control the speed of different fans)', open since Mar 20 2024) and https://github.com/Shuzhengz/TPFanCtrl2/issues/55"
+        },
+        {
+          "feature": "Already-covered upstream merges (do not port)",
+          "detail": "Verified our tree already contains the equivalents of every substantive merged upstream PR: PR #69 hysteresis + conditional sensor offsets (fanlogic.h hystUp/hystDown, tests/fanlogic_tests.cpp), PR #86/#89 lid detection (fancontrol.cpp:46,309,3467), PR #76 ManModeExit parameter (misc.cpp:560, ini line 55), PR #97 line buffer 256->512 (ours is 1024, misc.cpp:88/195/262/320), PR #75 dual-fan display fix (covered by our P15G2 dual-fan rewrite). Consistent with the stored parity note vs upstream 2.3.3.",
+          "adoptable": false,
+          "effort": "none — already present",
+          "evidence": "Upstream: https://github.com/Shuzhengz/TPFanCtrl2/pull/69 ('Hysteresis + Sensor offset', merged Dec 29 2024), https://github.com/Shuzhengz/TPFanCtrl2/pull/86, https://github.com/Shuzhengz/TPFanCtrl2/pull/76 ('Replace hardcoded 75 by parameter ManModeExit', merged Feb 7 2025), https://github.com/Shuzhengz/TPFanCtrl2/pull/97 ('Increase line buffer size from 256 to 512', merged Aug 20 2025). Local: C:\\Users\\User00\\Desktop\\Open_Claude_session_2\\TPFanCtrl2-main\\fancontrol.x\\fanlogic.h:25-26, fancontrol.cpp:3467, misc.cpp:560, misc.cpp:88"
+        }
+      ]
+    }
+  ]
+}

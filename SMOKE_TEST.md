@@ -17,25 +17,59 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
 
 - ☐ `msbuild fancontrol.sln /m /p:Configuration=Release /p:Platform=Win32` → 0 errors.
 - ☐ `msbuild fancontrol.sln /m /p:Configuration=Debug   /p:Platform=Win32` → 0 errors.
-- ☐ Only the known pre-existing warning (`GetVersion` deprecation in `SystemTraySDK.cpp`).
+- ☐ Build is **warning-free** (the old `GetVersion` deprecation was removed in v2.34).
+- ☐ `powershell tests\run_tests.ps1` → all fan-logic checks pass.
 
 ## 1. Normal UI run
 
 - ☐ Launch `TPFanControl.exe`. Window appears; temperatures and both fan RPMs update.
-- ☐ Tray icon shows; tooltip shows max temp + RPM; color tracks temperature thresholds.
+- ☐ Title bar shows the app icon (top-left system-menu corner); caption says **v2.34**.
+- ☐ Tray icon shows as a **rounded badge** with crisp digits; tooltip shows mode +
+      max temp + fan + RPM; color tracks temperature thresholds.
 - ☐ Switch **BIOS → Smart → Manual** via radios; the Log records each mode change.
-- ☐ In Manual, drag the speed slider; fan audibly changes; `Switch` temp/`Fan Level` update.
+- ☐ In Manual, drag the speed slider (accent-colored track, round thumb); fan audibly
+      changes; `Switch` temp / `Fan Level` update.
+- ☐ Slide to **MAX** → a TaskDialog warns; tick *"Don't ask again until the next
+      start"*, cancel, slide again → second prompt honors/skips per the checkbox.
 - ☐ Leave Manual and let temp exceed `ManModeExit` → it auto-reverts to Smart.
-- ☐ Toggle Dark mode, Show log, Temp hex — UI re-themes/relays without artifacts.
-- ☐ Resize the window — controls reflow; the log auto-shrink/restore works.
+- ☐ Hover the temperature history graph → tracking tooltip shows the sample's value
+      and age; a marker follows the cursor; right-click → Clear history still works.
+- ☐ Tick **Show log** → the panel opens **pre-filled with recent lines** (startup,
+      mode changes), and new events stream in live without flicker.
+- ☐ Resize the window — controls reflow, no flicker during the drag; the log
+      auto-shrink/restore works.
+- ☐ Keyboard: Tab reaches the BIOS/Smart/Manual radios and the all/active filter;
+      arrow keys move within each group; focus rectangles visible from launch.
 
-## 2. Interactive close (the well-exercised path)
+## 2. Win11 UI & theming (new in v2.34)
+
+- ☐ Toggle **Dark mode** → window, title bar, menus, tooltips, Settings and Curve
+      dialogs all flip; no light remnants (check tooltips especially).
+- ☐ Set `DarkMode=2` (or tick *Follow system theme* in Settings) → switching the
+      Windows app theme (Settings → Personalization → Colors) re-themes the app live,
+      including an *open* Settings dialog.
+- ☐ Change the Windows **accent color** → section headers and the "On" state word
+      update (main window immediately; open dialogs too).
+- ☐ Settings: section headers are bold + accent-colored; unit hints are dimmed;
+      OK/Apply/Cancel right-aligned; *"Show in taskbar"* checkbox present.
+- ☐ `ShowInTaskbar=1` (or the checkbox): taskbar button appears with a severity
+      overlay dot and a fan-level progress fill; Alt-Tab shows the app; toggling off
+      removes the button cleanly.
+- ☐ Tray: **Enter/Space** on the keyboard-focused tray icon toggles the window once
+      (no double-toggle); right-click menu opens anchored at the icon; window
+      fades in/out instead of snapping.
+- ☐ Kill and restart `explorer.exe` (Task Manager) → the tray icon **returns** within
+      a second (elevated-app UIPI fix).
+- ☐ (Optional) Enable a High Contrast theme → app adopts system colors, title bar
+      returns to system chrome; disable it → custom theming returns.
+
+## 3. Interactive close (the well-exercised path)
 
 - ☐ Exit via tray menu **End program** (or window close if configured to exit).
 - ☐ Fan is set back to **BIOS (0x80)** before exit — confirm "On close ... OK" in the log.
 - ☐ Process is gone (Task Manager); no orphaned tray icon after a mouse-over.
 
-## 3. Windows shutdown / restart (deferred-restore regression)
+## 4. Windows shutdown / restart (deferred-restore regression)
 
 > This exercises `WM_ENDSESSION`. The restore must happen **synchronously**, not deferred.
 
@@ -45,9 +79,37 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
       line is present, and there is **no** "Delaying close" left hanging.
 - ☐ Fan is not stuck at a fixed manual level after the reboot/login.
 
-## 4. Game Mode (driver hide/restore)
+## 5. Sleep / Modern Standby (new in v2.34)
 
-- ☐ Enable **Game mode (Hide Drivers)**. Balloon confirms; `TVicHW64.sys` and
+> Default `SuspendMode=1`: BIOS during sleep, mode restored after a ~10 s EC settle.
+
+- ☐ In **Manual** mode, sleep the machine (power menu → Sleep). Log shows
+      *"Sleep transition: handing fan control to BIOS"* (via the Modern Standby
+      watcher or APM path).
+- ☐ Wake it. Log shows *"Resume detected - deferring EC access (10s)"*, then
+      ~10 s later *"Resume settle complete - restoring pre-sleep mode"*; the Manual
+      radio is selected again and the fan level is re-asserted.
+- ☐ Close the lid, wait for standby, open it → lid handling and sleep handling
+      don't fight (mode ends up back where it was).
+- ☐ Temperatures and RPMs are sane immediately after the settle window (no
+      garbage readings logged during the first polls).
+- ☐ With `SuspendMode=0`, sleep/wake changes nothing (feature fully opt-out).
+
+## 6. Safety guards
+
+- ☐ **Fail-safe**: set `FailsafeTemp` just above idle temp, load the CPU → at the
+      threshold the fan forces to max and the log shows *"Fail-safe TRIPPED"*;
+      cooling ~3 °C below releases it.
+- ☐ **Stall watchdog** (passive): grep the log for *"Fan stall"* — should appear
+      **only** if the EC genuinely dropped a command; none expected in normal runs.
+- ☐ **Emergency hibernate** (optional, careful): set `CriticalTemp=70` (just above
+      a loaded temp), stress briefly → after 3 polls at/above it the log records
+      *"CRITICAL ... hibernating"* and the machine hibernates; on resume it does
+      **not** immediately re-hibernate (re-arms only 5 °C below). Reset to 0/95 after.
+
+## 7. Game Mode (driver hide/restore)
+
+- ☐ Enable **Game mode (Hide Drivers)**. TaskDialog confirms; `TVicHW64.sys` and
       `TVicPort64.sys` in `C:\Windows\System32\drivers` become `*.sys.bak`.
 - ☐ Disable Game mode. Both `.sys` files are restored; no `.bak` left behind.
 - ☐ Enable Game mode, then exit the app cleanly → drivers are restored on exit.
@@ -55,7 +117,7 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
       one file open) and confirm the **first rename is rolled back** — you never end up
       with one `.sys` and one `.sys.bak`.
 
-## 5. Service lifecycle (the focus area)
+## 8. Service lifecycle
 
 > Service runs headless; the worker opens the EC port (retries up to 180 s) then runs
 > the same control loop. Verify install/start/stop/uninstall and a stop *during* startup.
@@ -77,16 +139,19 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
 - ☐ **Uninstall:** `TPFanControl.exe -u`. Service removed from `services.msc`.
 - ☐ After stop/uninstall: no leaked handles to the EC; relaunching the UI works normally.
 
-## 6. EC robustness
+## 9. EC robustness
 
 - ☐ Temperatures look sane (no wildly wrong / stale values jumping around).
 - ☐ Under load (stress the CPU/GPU) the fan ramps according to the Smart table.
 - ☐ Pull the log: no sustained "readec: timed out" / "failed to read reliable status"
       spam. Occasional retries are normal; a continuous stream is not.
-- ☐ Force many consecutive read errors (rare) → app falls back to BIOS mode and closes
-      rather than driving the fan on stale data.
+- ☐ Force many consecutive read errors (rare) → the Status field shows
+      *"EC read error n/m - showing last good reading"*, then the app falls back to
+      BIOS mode and closes rather than driving the fan on stale data.
+- ☐ During an error streak, restore from the tray → readouts show the **last good
+      reading**, not blanks.
 
-## 7. Config safety
+## 10. Config safety
 
 - ☐ Change settings via the in-app Settings dialog → `TPFanControl.ini` is updated and
       the original is never lost even if a save is interrupted (atomic replace).
@@ -94,6 +159,8 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
       are excluded from the max-temp calculation.
 - ☐ A config with an excessive number of `level=` / `level2=` lines does not crash
       (parsing is bounded to the array size).
+- ☐ **First run with no ini** (rename `TPFanControl.ini`, launch): a default ini is
+      written **and the window + tray icon appear** on that first run.
 
 ---
 

@@ -25,26 +25,40 @@ Grab the `TPFanControl-P15G2-*.zip`, unzip it anywhere, and run
 
 This is a fork of the classic *TPFanControl / TPFanCtrl2* tailored for the
 **ThinkPad P15 Gen2 (dual fan)**, with a number of additional features (see
-below). Code version string: `2.33 P15G2 Dual`.
+below). Code version string: `2.34 P15G2 Dual`.
 
 > ⚠️ **Use at your own risk.** This tool writes directly to the embedded
 > controller. Misconfiguring the fan curve can let the machine run hot. The
-> app falls back to BIOS fan control on exit, on lid close, and after repeated
-> EC read errors.
+> app falls back to BIOS fan control on exit, on lid close, across
+> sleep/Modern Standby (configurable), and after repeated EC read errors.
 
 ## Features
 
 - Dual-fan (fan1/fan2) read-out and control for the P15 Gen2.
 - **Smart mode** with per-level hysteresis and two switchable profiles (SM1/SM2).
 - **Manual mode** with a fan-speed slider (0–7, 64 = max, 128 = hand back to BIOS).
-- **Temperature history graph** (in-window sparkline) with current / average /
-  min–max readout; right-click to clear.
-- **Tray temperature icon** showing the current max temperature, color-coded by
-  the same thresholds as the in-app temperature list (green → amber → orange →
-  red; gray in BIOS mode).
-- **In-app Settings dialog** (writes `TPFanControl.ini`) with live Apply,
-  including editable icon color thresholds, poll interval, and a graph toggle.
-- **Dark mode**, per-monitor **DPI** scaling, and a resizable window.
+- **Layered safety guards**: thermal fail-safe (forces full fan speed above
+  `FailsafeTemp`), a fan-stall watchdog (re-issues the level if the EC silently
+  drops a command), an optional **emergency hibernate** at `CriticalTemp`, and
+  automatic BIOS fallback after repeated EC read errors.
+- **Sleep-aware**: hands the fan to the BIOS across suspend *and* Modern
+  Standby (S0), defers EC access ~10 s after wake, then restores your mode and
+  re-asserts the fan level (`SuspendMode`).
+- **Temperature history graph** (in-window sparkline, antialiased) with
+  current / average / min–max readout; hover any point for its value and age;
+  right-click to clear.
+- **Tray temperature icon** — a rounded, theme-aware badge showing the current
+  max temperature, color-coded by the same thresholds as the in-app list
+  (green → amber → orange → red; neutral in BIOS mode). Modern tray protocol:
+  keyboard activation, menu anchored at the icon, rich multi-line tooltip.
+- **In-app Settings dialog** (writes `TPFanControl.ini`) with live Apply, plus
+  an in-app **Smart fan-curve editor**.
+- **Windows 11 native look**: dark mode (or follow the system theme,
+  `DarkMode=2`), High Contrast support, your accent color, seamless title-bar
+  chrome, Segoe UI Variable, per-monitor **DPI** scaling, resizable window,
+  full keyboard navigation.
+- Optional **taskbar button** (`ShowInTaskbar=1`) with a temperature badge and
+  fan-level progress fill (Alt-Tab / Snap Layouts participation).
 - **Game Mode** — temporarily hides the TVicPort kernel-driver files so
   anti-cheat (e.g. Riot Vanguard) doesn't flag them; restored automatically on
   exit/shutdown.
@@ -105,9 +119,64 @@ Highlights:
 - `Level=temp fan hystUp hystDown` — the Smart-mode curve.
 - `IconLevels=warm hot critical` — tray-icon / list / graph color thresholds.
 - `Cycle` — poll interval in seconds (also the graph sample rate).
+- `DarkMode` — 0 light, 1 dark, 2 follow the Windows app theme (live).
+- `SuspendMode` — sleep handling: 0 ignore, 1 BIOS during sleep + restore
+  after resume (default), 2 keep the mode (still re-asserts after resume).
+- `FailsafeTemp` — force full fan speed at/above this °C (0 = off).
+- `CriticalTemp` — emergency hibernate if the max temp holds at/above this °C
+  even at full fan speed (0 = off; recommended 95).
+- `ShowInTaskbar` — 0 tray-only (default), 1 also show a taskbar button.
 - Hotkeys (`Ctrl+Shift+B/S/M/1/2`) for switching modes.
 
 ## Changelog
+
+### v2.34.0
+
+Major release: a full Windows 11 GUI modernization, sleep-aware fan handling,
+and new safety guards. Still pure Win32 — no frameworks, no new link-time
+dependencies (everything OS-version-sensitive is loaded dynamically and
+degrades gracefully on Windows 10).
+
+**Safety & power**
+- **Sleep/Modern Standby handling** (`SuspendMode`, default on): the fan is
+  handed to the BIOS when the machine suspends — including S0 Modern Standby,
+  detected via Kernel-Power events — EC access is deferred ~10 s after wake,
+  then the previous mode is restored and the fan level re-asserted (firmware
+  can reset the fan register during sleep).
+- **Fan-stall watchdog**: if the EC register commands a spinning level but both
+  tachometers read ~0 for 3 polls, the level is re-issued and logged (catches
+  silently dropped EC writes).
+- **Emergency hibernate** (`CriticalTemp`, opt-in): if the max temperature
+  holds at/above the threshold even at full fan speed, the machine hibernates
+  before the firmware's hard thermal trip cuts power.
+- Fixed: first run without a `TPFanControl.ini` used to start windowless and
+  tray-less; an uninitialized power-notification handle could reach the OS on
+  early-exit paths.
+
+**Windows 11 GUI**
+- Dark mode rebuilt: follow-the-system option (`DarkMode=2`, live switching),
+  High Contrast support, accent-colored headers/state, seamless title-bar and
+  border chrome, dark flat tooltips (XP balloons gone), Segoe UI Variable.
+- Manual-fan slider redrawn Win11-style (accent track, round thumb); native
+  TaskDialog prompts (the MAX-fan warning gained "don't ask again").
+- Temperature graph: antialiased trace (GDI+, dynamic), hover inspection with
+  a value/age tooltip and marker.
+- Tray rebuilt: 32-bit alpha rounded badge icon with antialiased digits that
+  adapts to light/dark taskbars, NOTIFYICON_VERSION_4 protocol (keyboard
+  activation, menu anchored at the icon), toasts branded with the live
+  severity icon, and a UIPI fix so the icon survives Explorer restarts.
+- Optional taskbar button (`ShowInTaskbar`) with temperature overlay badge and
+  fan-level progress; window fade on tray show/hide; title-bar icon.
+- Typography/layout pass: bold accent section headers, dimmed secondary
+  labels, hairline dividers, aligned columns, right-aligned command rows, full
+  keyboard navigation with always-visible focus cues, one `47°C` formatter.
+- Log panel: in-place append (no flicker) backed by an in-memory tail, so
+  opening "Show log" now shows the recent history instead of starting empty.
+
+**Internals**
+- RichEdit 4.1 (`msftedit`) for the temperature list; `InitCommonControlsEx`;
+  deprecated `GetVersion` probe removed (warning-free build); ~250 lines of
+  dead legacy code deleted.
 
 ### v2.33.7
 

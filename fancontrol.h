@@ -26,7 +26,7 @@
 #include "winstuff.h"
 #include "TaskbarTextIcon.h"
 
-#define FANCONTROLVERSION "2.33 P15G2 Dual"
+#define FANCONTROLVERSION "2.34 P15G2 Dual"
 
 #define WM__DISMISSDLG WM_USER+5
 #define WM__GETDATA WM_USER+6
@@ -164,6 +164,12 @@ protected:
 	int ManModeExitInternal;
 	int FailsafeTemp = 0;          // thermal fail-safe threshold in Celsius (0 = off)
 	bool m_failsafeTripped = false;   // true while the fail-safe is holding the fan at max
+	// emergency hibernate (the line of defense BEHIND the fail-safe): if max
+	// temp holds at/above CriticalTemp for 3 polls, hibernate before the
+	// firmware's hard thermal trip cuts power. 0 = off (opt-in).
+	int CriticalTemp = 0;
+	int m_critPolls = 0;           // consecutive polls at/above CriticalTemp
+	bool m_critFired = false;      // fired; re-arms after cooling 5 C below
 	bool m_failsafeWriteWarned = false; // one-shot trace fired: EC rejected the fail-safe write this trip
 	bool m_maxWarned = false;         // slider already prompted for max this visit (avoids re-prompt on repeat WM_HSCROLL)
 	bool m_maxConfirmSuppressed = false; // "don't ask again" ticked on the max-fan prompt (this run only)
