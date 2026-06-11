@@ -130,6 +130,16 @@ Highlights:
 
 ## Changelog
 
+### v2.34.1
+
+Docs-only repackage — no functional code changes since v2.34.0.
+
+- README: credits section now links the fork-network ideas this release
+  adopted (FanDjango, Tinnci, BeteixZ, upstream #95) and the embedded
+  `CSystemTray` class; screenshot updated (current dark-mode build) and shown
+  at half size.
+- The release zip carries this updated README.
+
 ### v2.34.0
 
 Major release: a full Windows 11 GUI modernization, sleep-aware fan handling,
