@@ -35,6 +35,9 @@
 // modal-dialog re-theme, posted (not handled inline) from WM_SETTINGCHANGE so
 // it runs after the main window's ApplyTheme rebuilt the shared brushes
 #define WM__RETHEMEDLG (WM_APP + 40)
+// Modern Standby entry/exit, posted from the event-log callback thread so all
+// EC/mode work stays on the UI thread (wParam: 1 = entering sleep, 0 = exit)
+#define WM__SLEEPEVT (WM_APP + 41)
 
 // EC fan-control register values (TP_ECOFFSET_FAN, reg 0x2F)
 #define FAN_CTRL_BIOS 0x80   // bit 7: EC/BIOS automatic control
@@ -409,10 +412,24 @@ protected:
 	// (HandleData, ModeToDialog) pass it to skip the redundant BM_GETCHECK reads.
 	void UpdateManualControlsEnabled(int mode = -1);
 
-	// for detecting lid closing
-	HPOWERNOTIFY hPowerNotify;
+	// for detecting lid closing (NULL-init: registration only happens when the
+	// dialog exists, and the destructor must not unregister a garbage handle)
+	HPOWERNOTIFY hPowerNotify = NULL;
 	bool isLidClosed = false;
 	int previousModeBeforeLidClose = -1;
+
+	// ---- sleep/resume handling (PBT_APM* + Modern Standby S0 events) -------
+	// the EC can be reset or unready around sleep transitions; see
+	// OnSleepTransition and the WM__GETDATA resume-settle gate
+	int SuspendMode;                       // ini: 0=ignore sleep, 1=BIOS during sleep + restore (default), 2=keep mode
+	int m_savedSleepMode = -1;             // mode saved at sleep entry (-1 = none pending)
+	ULONGLONG m_ecResumeDeferUntil = 0;    // skip EC polls until this tick after resume
+	HANDLE m_hEvtSub = NULL;               // EvtSubscribe handle (Kernel-Power 506/507)
+	void OnSleepTransition(bool entering); // UI thread only
+
+	// fan-stall watchdog: consecutive polls where the EC register commands a
+	// spinning level but both tachs read ~0 (lost/dropped EC write)
+	int m_stallPolls = 0;
 	// misc.cpp
 	int ReadConfig(const char* filename);
 

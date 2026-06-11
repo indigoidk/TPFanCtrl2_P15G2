@@ -44,6 +44,7 @@ FANCONTROL::SaveConfig(const char* configfile)
 		{ "StartMinimized", this->StartMinimized },
 		{ "StayOnTop",      this->StayOnTop },
 		{ "ShowInTaskbar",  this->ShowInTaskbar },
+		{ "SuspendMode",    this->SuspendMode },   // 0=ignore, 1=BIOS+restore, 2=keep
 		{ "ShowTempIcon",   this->ShowTempIcon },
 		{ "ShowTempHex",    this->ShowTempHex },
 		{ "ShowLog",        this->ShowLog },
@@ -602,6 +603,13 @@ FANCONTROL::ReadConfig(const char* configfile)
 				this->ShowInTaskbar = atoi(buf + 14);
 				continue;
 			}
+
+			// sleep handling: 0=ignore, 1=BIOS during sleep + restore, 2=keep mode
+			if (_strnicmp(buf, "SuspendMode=", 12) == 0) {
+				int v = atoi(buf + 12);
+				this->SuspendMode = (v >= 0 && v <= 2) ? v : 1;
+				continue;
+			}
 			
 			if (_strnicmp(buf, "Log2csv=", 8) == 0) {
 				this->Log2csv = atoi(buf + 8);
@@ -695,20 +703,6 @@ FANCONTROL::ReadConfig(const char* configfile)
 
 		fclose(f);
 
-		if (this->StayOnTop)
-			this->hwndDialog = ::CreateDialogParam(hinstapp,
-				MAKEINTRESOURCE(9000),
-				HWND_DESKTOP,
-				(DLGPROC)BaseDlgProc,
-				(LPARAM)this);
-
-		else
-			this->hwndDialog = ::CreateDialogParam(hinstapp,
-				MAKEINTRESOURCE(9002),
-				HWND_DESKTOP,
-				(DLGPROC)BaseDlgProc,
-				(LPARAM)this);
-
 		// end marker for smart levels array
 		if (lcnt1) {
 			this->SmartLevels[lcnt1].temp = -1;
@@ -790,7 +784,12 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"# Thermal fail-safe: force full fan speed (max) when the max temperature\r\n"
 				"# reaches this (deg C), in Smart/Manual mode, until ~3 deg below.\r\n"
 				"# 0 = disabled.\r\n"
-				"FailsafeTemp=0\r\n",
+				"FailsafeTemp=0\r\n"
+				"\r\n"
+				"# Sleep handling (suspend / Modern Standby): 0 = ignore sleep,\r\n"
+				"# 1 = hand fan to BIOS during sleep and restore the mode after resume,\r\n"
+				"# 2 = keep the current mode (still re-asserts the level after resume)\r\n"
+				"SuspendMode=1\r\n",
 				fnew);
 			fclose(fnew);
 			this->Trace("TPFanControl.ini not found - created a default one");
@@ -798,6 +797,22 @@ FANCONTROL::ReadConfig(const char* configfile)
 		else {
 			this->Trace("TPFanControl.ini missing, default values:");
 		}
+	}
+
+	// Create the main dialog regardless of ini presence: a first run with no
+	// ini used to come up windowless AND tray-less (the tray binds to
+	// hwndDialog) until a restart. StayOnTop is either the parsed value or
+	// the default. (Fix observed in the BeteixZ fork, commit 10e3ab4.)
+	this->hwndDialog = ::CreateDialogParam(hinstapp,
+		MAKEINTRESOURCE(this->StayOnTop ? 9000 : 9002),
+		HWND_DESKTOP,
+		(DLGPROC)BaseDlgProc,
+		(LPARAM)this);
+	if (!this->hwndDialog) {
+		char emsg[128];
+		sprintf_s(emsg, sizeof(emsg),
+			"Could not create the main window (error %lu).", ::GetLastError());
+		::MessageBoxA(NULL, emsg, "TPFanControl", MB_OK | MB_ICONERROR);
 	}
 
 	// Running as a service exactly when the SCM control handler has been

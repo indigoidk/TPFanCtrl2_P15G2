@@ -199,6 +199,31 @@ FANCONTROL::HandleData(void) {
 	sprintf_s(this->Title2 + strlen(this->Title2), sizeof(this->Title2) - strlen(this->Title2),
 		" %d/%d rpm", this->fan1speed, this->fan2speed);
 
+	// fan-stall watchdog (idea: Tinnci fork 67f1014): the EC register reports
+	// a level that should spin the fans, but both tachs read ~0 - the EC has
+	// silently dropped or ignored the command, a failure mode neither the
+	// thermal fail-safe nor the read-error fallback can see. After 3 such
+	// polls in a row, re-issue the level to kick the EC. Both tachs must be
+	// dead before this fires, so a one-fan idle design or a single flaky tach
+	// can't trigger it; re-issuing an already-programmed level is harmless.
+	{
+		int lvl = fanctrl & 0x7f;
+		bool shouldSpin = !(fanctrl & FAN_CTRL_BIOS) && lvl >= 1;
+		if (shouldSpin && this->fan1speed < 200 && this->fan2speed < 200) {
+			if (++this->m_stallPolls >= 3) {
+				char sbuf[128];
+				sprintf_s(sbuf, sizeof(sbuf),
+					"Fan stall: level 0x%02x commanded but %d/%d rpm - reissuing",
+					fanctrl, this->fan1speed, this->fan2speed);
+				this->Trace(sbuf);
+				this->SetFan("StallRecover", lvl);
+				this->m_stallPolls = 0;
+			}
+		}
+		else
+			this->m_stallPolls = 0;
+	}
+
 	// compose the richer multi-line tray tooltip (mode / max temp / fan / active
 	// profile, plus game + EC-error flags). Title2 stays the single-line title.
 	{

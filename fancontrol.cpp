@@ -20,6 +20,8 @@
 #include "taskbartexticon.h"
 #include "sysinfoapi.h"
 #include <shobjidl.h>   // ITaskbarList3 (taskbar overlay/progress, inbox COM)
+#include <winevt.h>     // EvtSubscribe (Modern Standby S0 watcher)
+#pragma comment(lib, "wevtapi.lib")
 
 // WM_DPICHANGED arrived in the Win8.1 SDK headers (_WIN32_WINNT >= 0x0603);
 // this app targets Vista (0x0600), so define it locally. The message is simply
@@ -41,6 +43,8 @@ static COLORREF GetAccentColor(COLORREF fallback, BOOL darkBg);
 static void ApplyDwmChromeColors(HWND hwnd, BOOL dark, BOOL reset);
 static void ShutdownGdiplus();   // sparkline GDI+ teardown (defined with DrawSparkline)
 static BOOL CALLBACK SetFontChildProc(HWND h, LPARAM lp);   // defined near RescaleForDpi
+static DWORD WINAPI ModernStandbyCallback(EVT_SUBSCRIBE_NOTIFY_ACTION action,
+	PVOID ctx, EVT_HANDLE hEvent);   // defined near OnSleepTransition
 
 
 DEFINE_GUID(GUID_LIDSWITCH_STATE_CHANGE,
@@ -133,6 +137,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	this->DarkModeSetting = 1;   // 0=light, 1=dark, 2=follow the system theme
 	this->ShowGraph = 1;
 	this->ShowInTaskbar = 0;     // default: tray-only tool window, like always
+	this->SuspendMode = 1;       // default: hand fan to BIOS across sleep, restore after
 	// read by UpdateTaskbarIndicators before the first successful EC poll
 	// assigns it in HandleData; BIOS bit = clean no-progress taskbar state
 	this->fanctrl2 = FAN_CTRL_BIOS;
@@ -369,6 +374,20 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	// window; also re-applied live when toggled in Settings.
 	if (this->ShowInTaskbar)
 		this->ApplyTaskbarPresence();
+
+	// Modern Standby (S0) watcher: classic PBT_APMSUSPEND/RESUME messages are
+	// not delivered reliably on S0-idle machines (this one included), so also
+	// watch Kernel-Power events 506 (S0 entry) / 507 (S0 exit). The callback
+	// only posts to the window - see ModernStandbyCallback.
+	if (this->SuspendMode != 0 && this->hwndDialog) {
+		this->m_hEvtSub = ::EvtSubscribe(NULL, NULL, L"System",
+			L"*[System[Provider[@Name='Microsoft-Windows-Kernel-Power']"
+			L" and (EventID=506 or EventID=507)]]",
+			NULL, (PVOID)this->hwndDialog, ModernStandbyCallback,
+			EvtSubscribeToFutureEvents);
+		if (!this->m_hEvtSub)
+			this->Trace("Modern Standby watcher unavailable (EvtSubscribe failed)");
+	}
 
 	// Field tooltips: demystify the terse main-window labels. Registered here, on
 	// the *final* window (after the optional slim-dialog swap above), so the tips
@@ -693,6 +712,68 @@ FANCONTROL::ApplyTaskbarPresence() {
 }
 
 //-------------------------------------------------------------------------
+//  sleep/resume handling (idea: FanDjango fork 2.3.12/2.3.13; upstream
+//  issues #94/#61). On sleep entry, SuspendMode picks the behavior:
+//    0 = ignore sleep entirely
+//    1 = hand the fan to the BIOS for the duration (default - a fixed
+//        manual/smart level must not persist while the EC drifts through
+//        standby power states), restore the saved mode after resume
+//    2 = keep the current mode, but still re-assert it after resume
+//        (firmware can reset the fan register during sleep)
+//  On resume, EC access is deferred ~10s (the EC can return garbage or NAK
+//  right after wake); the WM__GETDATA gate does the deferred restore.
+//  UI thread only - Modern Standby events arrive via posted WM__SLEEPEVT.
+//-------------------------------------------------------------------------
+void
+FANCONTROL::OnSleepTransition(bool entering) {
+	if (this->SuspendMode == 0)
+		return;
+
+	if (entering) {
+		if (this->m_savedSleepMode >= 0 || this->CurrentMode < 0)
+			return;   // already inside a sleep window (APM + S0 can both fire)
+		this->m_savedSleepMode = this->CurrentMode;
+		if (this->SuspendMode == 1 && this->CurrentMode != 1) {
+			this->Trace("Sleep transition: handing fan control to BIOS");
+			this->ModeToDialog(1);
+			this->SetFan("Sleep, switch to BIOS mode", FAN_CTRL_BIOS);
+		}
+		else
+			this->Trace("Sleep transition detected (keeping mode)");
+	}
+	else {
+		this->m_ecResumeDeferUntil = ::GetTickCount64() + 10000;
+		this->Trace("Resume detected - deferring EC access (10s)");
+	}
+}
+
+//-------------------------------------------------------------------------
+//  Modern Standby (S0) watcher callback. Runs on an event-log worker thread,
+//  so it must not touch the EC or any UI state: it renders the event XML,
+//  picks out Kernel-Power EventID 506 (S0 entry) / 507 (S0 exit), and posts
+//  WM__SLEEPEVT to the main window (ctx). Errors are silently ignored - the
+//  APM path still covers classic sleep.
+//-------------------------------------------------------------------------
+static DWORD WINAPI ModernStandbyCallback(EVT_SUBSCRIBE_NOTIFY_ACTION action,
+	PVOID ctx, EVT_HANDLE hEvent) {
+	if (action != EvtSubscribeActionDeliver || !ctx)
+		return ERROR_SUCCESS;
+
+	DWORD used = 0, props = 0;
+	wchar_t xml[2048] = L"";
+	if (::EvtRender(NULL, hEvent, EvtRenderEventXml,
+			sizeof(xml) - sizeof(wchar_t), xml, &used, &props)) {
+		// match ">506</EventID>" so an EventID element with a Qualifiers
+		// attribute still hits
+		bool entry = wcsstr(xml, L">506</EventID>") != NULL;
+		bool exit2 = wcsstr(xml, L">507</EventID>") != NULL;
+		if (entry || exit2)
+			::PostMessage((HWND)ctx, WM__SLEEPEVT, entry ? 1 : 0, 0);
+	}
+	return ERROR_SUCCESS;
+}
+
+//-------------------------------------------------------------------------
 //  taskbar button extras (opt-in via ShowInTaskbar=1): colored severity dot
 //  as the overlay badge, fan level 0-8 as the progress fill (paused/error
 //  states mirror the warm/critical thresholds). Deduped by signature so the
@@ -894,6 +975,13 @@ FANCONTROL::ConfirmMaxFan() {
 //  destructor
 //-------------------------------------------------------------------------
 FANCONTROL::~FANCONTROL() {
+	// stop the Modern Standby watcher first: its callback posts to the window
+	// this destructor is about to destroy
+	if (this->m_hEvtSub) {
+		::EvtClose(this->m_hEvtSub);
+		this->m_hEvtSub = NULL;
+	}
+
 	if (this->m_driversHidden)
 		this->ToggleGameMode(true);   // restore TVic drivers on clean exit (no UI)
 
@@ -926,7 +1014,12 @@ FANCONTROL::~FANCONTROL() {
 	}
 	if (this->m_comInit)
 		::CoUninitialize();
-	UnregisterPowerSettingNotification(this->hPowerNotify);
+	// guarded: registration only happens when a dialog was created, so an
+	// early-exit path must not hand a never-assigned handle to the API
+	if (this->hPowerNotify) {
+		UnregisterPowerSettingNotification(this->hPowerNotify);
+		this->hPowerNotify = NULL;
+	}
 	if (this->hwndDialog)
 		::DestroyWindow(this->hwndDialog);
 
@@ -3490,6 +3583,18 @@ FANCONTROL::DlgProc(HWND
 				}
 			}
 		}
+		else if (mp1 == PBT_APMSUSPEND) {
+			this->OnSleepTransition(true);
+		}
+		else if (mp1 == PBT_APMRESUMEAUTOMATIC || mp1 == PBT_APMRESUMESUSPEND) {
+			this->OnSleepTransition(false);
+		}
+		break;
+
+	case WM__SLEEPEVT:
+		// Modern Standby entry/exit, marshalled from the event-log thread
+		this->OnSleepTransition(mp1 != 0);
+		rc = TRUE;
 		break;
 
 
@@ -3632,6 +3737,24 @@ FANCONTROL::DlgProc(HWND
 		//
 
 	case WM__GETDATA:
+		// resume settle gate: the EC can return garbage or NAK right after a
+		// sleep exit, so skip polls until the window passes, then restore the
+		// pre-sleep mode saved by OnSleepTransition and force the smart logic
+		// to re-assert its level (the firmware may have reset the register)
+		if (this->m_ecResumeDeferUntil) {
+			if (::GetTickCount64() < this->m_ecResumeDeferUntil)
+				break;
+			this->m_ecResumeDeferUntil = 0;
+			if (this->m_savedSleepMode >= 0) {
+				if (this->SuspendMode == 1 &&
+						this->m_savedSleepMode != this->CurrentMode) {
+					this->Trace("Resume settle complete - restoring pre-sleep mode");
+					this->ModeToDialog(this->m_savedSleepMode);
+				}
+				this->LastSmartLevel = -1;   // re-decide + rewrite on next poll
+				this->m_savedSleepMode = -1;
+			}
+		}
 		if (!this->hThread && !this->FinalSeen)
 		{
 			this->hThread = this->CreateThread(FANCONTROL_Thread, (ULONG)this);
