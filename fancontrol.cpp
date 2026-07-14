@@ -519,6 +519,10 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 	m_fanTimer = ::SetTimer(this->hwndDialog, 1, this->Cycle * 1000, NULL);    // fan update
 	m_titleTimer = ::SetTimer(this->hwndDialog, 2, 500, NULL);                // title update
+	// The poll timer is what actually enforces fan control; if it could not be
+	// created the app would sit "active" but never poll or drive the fan (M-03).
+	if (!m_fanTimer)
+		this->Trace("WARNING: fan poll timer could not be created - fan control will NOT run");
 	// No dedicated icon timer (id 3): the tray-icon refresh runs unconditionally
 	// after every WM_TIMER tick, so the 500ms title timer already updates it more
 	// often than IconCycle would. m_iconTimer stays NULL; its KillTimer calls no-op.
@@ -992,8 +996,12 @@ FANCONTROL::~FANCONTROL() {
 
 	if (this->hThread) {
 		// close the handle only after a confirmed clean exit; on timeout we leak
-		// the handle rather than risk closing one still in use by a live thread
-		if (::WaitForSingleObject(this->hThread, 2000) == WAIT_OBJECT_0)
+		// the handle rather than risk closing one still in use by a live thread.
+		// 8000ms (not 2000): a worst-case ReadEcStatus can run ~3.6s on the default
+		// path, so the old 2s wait could return while the worker was still touching
+		// `this` / doing port I/O after teardown began - use the same budget as the
+		// close path (THREAD_WAIT_TIMEOUT_MS) to join cleanly in the common case (C-03).
+		if (::WaitForSingleObject(this->hThread, 8000) == WAIT_OBJECT_0)
 			::CloseHandle(this->hThread);
 		this->hThread = NULL;
 	}
@@ -1734,6 +1742,17 @@ FANCONTROL::ToggleGameMode(bool silent) {
 		}
 		if (ok) {
 			this->m_driversHidden = true;
+			// Crash safety net: if we never get to restore (app uninstalled/moved, or
+			// a crash with a reboot), have the OS rename each .sys.bak back at the very
+			// next boot - smss.exe runs pending renames before any driver loads. A clean
+			// in-session restore moves the .sys back first, making this a harmless no-op.
+			// (No REPLACE_EXISTING: never clobber a .sys that Windows Update reinstalled.)
+			for (int i = 0; i < 2; i++) {
+				char bakd[MAX_PATH];
+				strcpy_s(bakd, sizeof(bakd), sys[i]);
+				strcat_s(bakd, sizeof(bakd), ".bak");
+				::MoveFileExA(bakd, sys[i], MOVEFILE_DELAY_UNTIL_REBOOT);
+			}
 			if (!silent && this->pTaskbarIcon && !this->NoBallons)
 				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
 					"Game Mode ON",
@@ -3828,8 +3847,9 @@ FANCONTROL::DlgProc(HWND
 				}
 			}
 
-			// after so many consecutive read errors, try to switch back to bios mode
-			if (this->ReadErrorCount > this->MaxReadErrors) {
+			// after so many consecutive read errors, try to switch back to bios mode.
+			// >= so MaxReadErrors=N fires on the Nth failure, not the (N+1)th (H-11).
+			if (this->ReadErrorCount >= this->MaxReadErrors) {
 				this->ModeToDialog(1);
 				ok = this->SetFan("Max. Errors", FAN_CTRL_BIOS);
 				if (ok) {

@@ -122,9 +122,10 @@ Highlights:
 - `DarkMode` — 0 light, 1 dark, 2 follow the Windows app theme (live).
 - `SuspendMode` — sleep handling: 0 ignore, 1 BIOS during sleep + restore
   after resume (default), 2 keep the mode (still re-asserts after resume).
-- `FailsafeTemp` — force full fan speed at/above this °C (0 = off).
-- `CriticalTemp` — emergency hibernate if the max temp holds at/above this °C
-  even at full fan speed (0 = off; recommended 95).
+- `FailsafeTemp` — force full fan speed at/above this temperature (display unit:
+  °C, or °F if your curve is in Fahrenheit; 0 = off).
+- `CriticalTemp` — emergency hibernate if the max temp holds at/above this
+  temperature even at full fan speed (same unit rule; 0 = off; recommended 95 °C).
 - `ShowInTaskbar` — 0 tray-only (default), 1 also show a taskbar button.
 - Hotkeys (`Ctrl+Shift+B/S/M/1/2`) for switching modes.
 

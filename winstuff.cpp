@@ -53,7 +53,11 @@ MUTEXSEM::Lock(int millies) {
 	int ok = FALSE;
 
 	int rc = this->hmux ? ::WaitForSingleObject(this->hmux, millies) : WAIT_FAILED;
-	ok = rc == WAIT_OBJECT_0;  // returns posted TRUE/FALSE
+	// WAIT_ABANDONED ALSO grants ownership (a previous owner died without releasing).
+	// Report it as acquired so the caller still balances it with Unlock(); returning
+	// failure here would drop the release, leave the recursion count unbalanced, and
+	// eventually deadlock EC access after any crash mid-transaction.
+	ok = (rc == WAIT_OBJECT_0 || rc == WAIT_ABANDONED);  // returns posted TRUE/FALSE
 
 	return ok;
 }

@@ -160,6 +160,11 @@ protected:
 		HK_TG_MS,
 		HK_TG_12;
 	int EC_CTRL, EC_DATA;
+	bool m_ecTypeKnown = false;   // true once a read has confirmed the EC port pair;
+	                              // freezes the TYPE1/TYPE2 probe so a transient timeout
+	                              // can no longer permanently flip the transport (H-02)
+	bool m_noSensorWarned = false;  // one-shot latch: logged that a poll had no usable
+	                                // sensor and the fan is being held (C-04)
 	int ManModeExit;
 	int ManModeExitInternal;
 	int FailsafeTemp = 0;          // thermal fail-safe threshold in Celsius (0 = off)

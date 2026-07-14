@@ -120,22 +120,47 @@ FANCONTROL::HandleData(void) {
 	maxtemp = 0;
 	imaxtemp = 0;
 	int senstemp;
+	bool anyValid = false;   // at least one NON-ignored sensor gave a usable reading this poll
+	int  safetyMax = 0;      // max RAW temp over ALL trusted sensors (bias- and ignore-list-
+	                         // independent); drives the thermal fail-safe / critical guards so a
+	                         // bias or an ignored hottest sensor can't mask a real overheat (H-07)
 	for (i = 0; i < 12; i++) {
-		if (this->State.Sensors[i] != 0x80 && this->State.Sensors[i] != 0x00 && !this->m_sensorIgnored[i]) {
-			senstemp = this->BiasedTemp(this->State.Sensors[i], i);
+		unsigned char raw = this->State.Sensors[i];
+		if (raw == 0x00 || raw == 0x80)
+			continue;                          // empty / invalid EC slot
+		if (raw < 128 && (int)raw > safetyMax)
+			safetyMax = raw;                   // safety backstop sees the raw hardware value
+		if (this->m_sensorIgnored[i])
+			continue;                          // ignore-list excludes only from the display/curve max
+		if (raw < 128)
+			anyValid = true;                   // a real reading is driving the curve max this poll
+		senstemp = this->BiasedTemp(raw, i);
 
-			// strict compare keeps the FIRST sensor that reached the max, so a later
-			// sensor merely tying it does not steal iMaxTemp (and the bold temp-list
-			// row) back and forth every poll cycle
-			if (senstemp < 128 && senstemp > maxtemp) {
-				maxtemp = senstemp;
-				imaxtemp = i;
-			}
+		// strict compare keeps the FIRST sensor that reached the max, so a later
+		// sensor merely tying it does not steal iMaxTemp (and the bold temp-list
+		// row) back and forth every poll cycle
+		if (senstemp < 128 && senstemp > maxtemp) {
+			maxtemp = senstemp;
+			imaxtemp = i;
 		}
 	}
+	bool safetyValid = (safetyMax > 0);   // at least one trusted sensor for the backstop
 
 	this->MaxTemp = maxtemp;
 	this->iMaxTemp = imaxtemp;
+
+	// C-04: a poll with no usable sensor (all slots invalid or ignored) leaves
+	// MaxTemp==0, which the Smart/Manual paths must NOT read as "cold" and use to
+	// spin the fan down. Latch a one-shot notice here; the per-mode guards below
+	// hold the current level, and the fail-safe override still forces max if tripped.
+	if (!anyValid) {
+		if (!this->m_noSensorWarned) {
+			this->Trace("No usable temperature sensor this poll - holding fan level (not lowering)");
+			this->m_noSensorWarned = true;
+		}
+	}
+	else
+		this->m_noSensorWarned = false;
 
 	// record this reading and refresh the history sparkline (owner-draw static 8120)
 	this->PushTempSample(this->MaxTemp);
@@ -376,20 +401,24 @@ FANCONTROL::HandleData(void) {
 		// write, so a trip with the fan already at max would otherwise leave no
 		// record in the trace - exactly the event worth a timestamp after a
 		// thermal incident
+		// use safetyMax (raw, all trusted sensors) not MaxTemp, so a positive bias or
+		// an ignored hottest sensor can't hide an overheat (H-07). The safetyValid
+		// guard means a poll with no trusted sensor neither trips nor RELEASES the
+		// fail-safe - uncertain telemetry holds the current trip state.
 		char fsbuf[128];
-		if (!this->m_failsafeTripped && this->MaxTemp >= this->FailsafeTemp) {
+		if (!this->m_failsafeTripped && safetyValid && safetyMax >= this->FailsafeTemp) {
 			this->m_failsafeTripped = true;
 			sprintf_s(fsbuf, sizeof(fsbuf),
 				"Fail-safe TRIPPED: max temp %d C reached threshold %d C, forcing full fan speed",
-				this->MaxTemp, this->FailsafeTemp);
+				safetyMax, this->FailsafeTemp);
 			this->Trace(fsbuf);
 		}
-		else if (this->m_failsafeTripped && this->MaxTemp <= this->FailsafeTemp - 3) {
+		else if (this->m_failsafeTripped && safetyValid && safetyMax <= this->FailsafeTemp - 3) {
 			this->m_failsafeTripped = false;
 			this->m_failsafeWriteWarned = false;
 			sprintf_s(fsbuf, sizeof(fsbuf),
 				"Fail-safe released: max temp %d C cooled below %d C",
-				this->MaxTemp, this->FailsafeTemp - 3);
+				safetyMax, this->FailsafeTemp - 3);
 			this->Trace(fsbuf);
 		}
 	}
@@ -407,21 +436,24 @@ FANCONTROL::HandleData(void) {
 	// Mode-independent: critical heat is critical in BIOS mode too. Re-arms
 	// only after cooling 5 C below the threshold so a resume into a
 	// still-hot machine cannot loop straight back into hibernation.
+	// safetyMax (raw) + safetyValid guards: a poll with no trusted sensor can neither
+	// re-arm nor escalate, and any non-hot/invalid poll resets the streak - so garbage
+	// telemetry can never accumulate three "critical" polls into a spurious hibernate.
 	if (this->CriticalTemp > 0) {
 		if (this->m_critFired) {
-			if (this->MaxTemp <= this->CriticalTemp - 5) {
+			if (safetyValid && safetyMax <= this->CriticalTemp - 5) {
 				this->m_critFired = false;
 				this->Trace("Critical-temp guard re-armed (cooled below threshold)");
 			}
 		}
-		else if (this->MaxTemp >= this->CriticalTemp) {
+		else if (safetyValid && safetyMax >= this->CriticalTemp) {
 			if (++this->m_critPolls >= 3) {
 				this->m_critFired = true;
 				this->m_critPolls = 0;
 				char cbuf[160];
 				sprintf_s(cbuf, sizeof(cbuf),
 					"CRITICAL: max temp %d C at/above %d C for 3 polls - forcing max fan and hibernating",
-					this->MaxTemp, this->CriticalTemp);
+					safetyMax, this->CriticalTemp);
 				this->Trace(cbuf);
 				this->SetFan("Critical", FAN_CTRL_FULL);
 				::MessageBeep(MB_ICONERROR);
@@ -442,7 +474,8 @@ FANCONTROL::HandleData(void) {
 		break;
 
 	case 2: // Smart
-		if (!this->m_failsafeTripped)   // fail-safe holds the fan; skip curve control
+		// anyValid: never run the curve on a no-sensor poll (would drive to fan 0 - C-04)
+		if (anyValid && !this->m_failsafeTripped)   // fail-safe holds the fan; skip curve control
 			this->SmartControl();       // (logs its own mode-change transition)
 		else
 			this->TraceModeChange();    // logs only an actual mode change arriving while the fail-safe holds
@@ -461,7 +494,9 @@ FANCONTROL::HandleData(void) {
 		int lvl = atoi(manlevel);
 		bool valid = isdigit((unsigned char)manlevel[0]) &&
 		             ((lvl >= 0 && lvl <= 7) || lvl == 64);
-		if (!this->m_failsafeTripped && valid) {
+		// anyValid: on a no-sensor poll hold the current level rather than re-issuing
+		// (harmless for a fixed level, but keeps "no telemetry -> no fan change" - C-04)
+		if (anyValid && !this->m_failsafeTripped && valid) {
 			if (this->State.FanCtrl != lvl)
 				ok = this->SetFan("Manual", lvl);
 			else
@@ -579,32 +614,48 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 		// Verify-and-retry: keep the 100ms settle waits (the EC needs them for a
 		// correct read-back) but cap retries/backoff so a failing EC can't freeze
 		// the UI thread for ~3.5s. Worst case now ~1.5s.
+		bool verified = false;   // set only when THIS attempt fully confirmed the level
 		for (int i = 0; i < 3; i++) {
-			// set new fan level; AND every write so a port failure is not masked
-			bool write_ok = true;
-			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
-			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
+			// Set the new level on both fans. Sequence with && so a FAILED selector
+			// write short-circuits its paired level write (H-03): a level byte must
+			// never land on whatever fan happened to be selected before. Any failed
+			// step drops the whole attempt into the retry/backoff below.
+			bool write_ok =
+				this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1) &&
+				this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
 
 			::Sleep(100);
 
-			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN2);
-			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
+			write_ok = write_ok &&
+				this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN2) &&
+				this->WriteByteToEC(TP_ECOFFSET_FAN, fanctrl);
 
 			::Sleep(100);
 
-			// verify completion of fan2
-			fan2_ok = this->ReadByteFromEC(TP_ECOFFSET_FAN, &this->State.FanCtrl);
+			// verify completion of fan2 into its OWN buffer (not the shared member),
+			// so the fan1 read-back below can't overwrite or alias it (H-04)
+			unsigned char fan2Read = 0xFF, fan1Read = 0xFF;
+			fan2_ok = this->ReadByteFromEC(TP_ECOFFSET_FAN, &fan2Read);
 
 			::Sleep(100);
 
-			// verify completion of fan1
-			write_ok &= this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
+			// re-select and verify completion of fan1
+			write_ok = write_ok &&
+				this->WriteByteToEC(TP_ECOFFSET_FAN_SWITCH, TP_ECVALUE_SELFAN1);
 
 			::Sleep(100);
 
-			fan1_ok = this->ReadByteFromEC(TP_ECOFFSET_FAN, &this->State.FanCtrl);
+			fan1_ok = this->ReadByteFromEC(TP_ECOFFSET_FAN, &fan1Read);
 
-			if (write_ok && fan1_ok && fan2_ok) {
+			// Confirm only when every write AND both read-backs of THIS attempt
+			// succeeded and both fans actually latched the level. ReadByteFromEC
+			// leaves its out-param untouched on failure, so requiring fan1_ok/fan2_ok
+			// (not merely a value compare against a possibly-stale buffer) stops a
+			// failed read from being mistaken for success (H-04).
+			if (write_ok && fan1_ok && fan2_ok &&
+					fan1Read == (unsigned char)fanctrl && fan2Read == (unsigned char)fanctrl) {
+				this->State.FanCtrl = fan1Read;   // publish the confirmed level
+				verified = true;
 				sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "[i=%d] ", i);
 				break;
 			}
@@ -617,7 +668,7 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 
 		this->FreeECAccess();
 
-		if (this->State.FanCtrl == fanctrl) {
+		if (verified) {
 			sprintf_s(obuf + strlen(obuf), sizeof(obuf) - strlen(obuf), "OK");
 			ok = true;
 			if (final)

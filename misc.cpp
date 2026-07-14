@@ -39,6 +39,15 @@ const char* TempUnit(int fahrenheitUnit) {
 void
 FANCONTROL::SaveConfig(const char* configfile)
 {
+	// FailsafeTemp/CriticalTemp are stored Celsius internally; write them in the user's
+	// display unit so a Fahrenheit ini round-trips (mirrors IconLevels below). Guard >0
+	// so 0 = off stays 0.
+	int fsT = this->FailsafeTemp, crT = this->CriticalTemp;
+	if (this->Fahrenheit) {
+		if (fsT > 0) fsT = fsT * 9 / 5 + 32;
+		if (crT > 0) crT = crT * 9 / 5 + 32;
+	}
+
 	struct KV { const char* key; int val; };
 	KV items[] = {
 		{ "StartMinimized", this->StartMinimized },
@@ -58,8 +67,8 @@ FANCONTROL::SaveConfig(const char* configfile)
 		{ "ShowBiasedTemps",this->ShowBiasedTemps },
 		{ "Lev64Norm",      this->Lev64Norm },
 		{ "NoExtSensor",    this->NoExtSensor },
-		{ "FailsafeTemp",   this->FailsafeTemp },   // deg C, 0 = off
-		{ "CriticalTemp",   this->CriticalTemp },   // deg C, 0 = off (hibernate guard)
+		{ "FailsafeTemp",   fsT },   // display unit on disk, Celsius internally
+		{ "CriticalTemp",   crT },   // display unit on disk, Celsius internally
 	};
 	const int N = (int)(sizeof(items) / sizeof(items[0]));
 	bool done[32] = { false };
@@ -612,10 +621,10 @@ FANCONTROL::ReadConfig(const char* configfile)
 				continue;
 			}
 
-			// emergency hibernate threshold (deg C, 0 = off; sane range only)
+			// emergency hibernate threshold (display unit; F->C convert + range-check
+			// happen in the post-parse block once Fahrenheit mode is known)
 			if (_strnicmp(buf, "CriticalTemp=", 13) == 0) {
-				int v = atoi(buf + 13);
-				this->CriticalTemp = (v >= 70 && v <= 110) ? v : 0;
+				this->CriticalTemp = atoi(buf + 13);
 				continue;
 			}
 			
@@ -854,6 +863,18 @@ FANCONTROL::ReadConfig(const char* configfile)
 	// display config
 	//
 	if (this->IconCycle <= 0 || this->IconCycle >= 60) this->IconCycle = 1;
+
+	// Clamp values that come straight from atoi() and feed timers / waits / safety.
+	// A hand-edited ini can otherwise set Cycle=0 (SetTimer(0) hammers the EC), a
+	// negative delay (cast to a huge ULONGLONG wait later), or MaxReadErrors=0
+	// (ReadErrorCount>=0 is always true -> instant BIOS fallback on the first error).
+	// Matches the ranges the Settings dialog already enforces (H-10).
+	if (this->Cycle < 1)          this->Cycle = 5;
+	if (this->Cycle > 600)        this->Cycle = 600;
+	if (this->SecStartDelay < 0)  this->SecStartDelay = 0;
+	if (this->SecWinUptime < 0)   this->SecWinUptime = 0;
+	if (this->MaxReadErrors < 1)  this->MaxReadErrors = 10;
+	if (this->MaxReadErrors > 1000) this->MaxReadErrors = 1000;
 	sprintf_s(buf, sizeof(buf), "  Active= %d, Cycle= %d, FanBeep= %d %d, MaxReadErrors= %d",
 		this->ActiveMode, this->Cycle,
 		this->FanBeepFreq, this->FanBeepDura, this->MaxReadErrors);
@@ -952,15 +973,20 @@ FANCONTROL::ReadConfig(const char* configfile)
 	sprintf_s(buf, sizeof(buf), "  NoWaitMessage= %d, ShowBiasedTemps= %d", NoWaitMessage, ShowBiasedTemps);
 	this->Trace(buf);
 
-	//ManModeExit Fahrenheit to Celsius and v.v.
-
-	if (Fahrenheit && (this->ManModeExit == 80))
-		this->ManModeExit = (this->ManModeExit * 9 / 5) + 32;
-
-	if (Fahrenheit)
+	// ManModeExit is given in the display unit; derive the Celsius value the Manual-
+	// mode auto-exit compares against MaxTemp (title timer). In Fahrenheit mode a
+	// value too low to be a sane F threshold (e.g. the Celsius default 78/80 left
+	// unconverted) is almost certainly a forgotten unit conversion, so treat it as
+	// Celsius rather than letting Manual self-exit at ~25 C. (Replaces a stale
+	// "== 80" check that matched the old constructor default but not the shipped 78.)
+	if (Fahrenheit) {
+		if (this->ManModeExit < 100)   // implausible as Fahrenheit -> interpret as Celsius
+			this->ManModeExit = (this->ManModeExit * 9 / 5) + 32;
 		this->ManModeExitInternal = (this->ManModeExit - 32) * 5 / 9;
-	else
+	}
+	else {
 		this->ManModeExitInternal = this->ManModeExit;
+	}
 
 	sprintf_s(buf, sizeof(buf), "  ManModeExit= %d, SecWinUptime= %d, SecStartDelay= %d", this->ManModeExit, this->SecWinUptime, this->SecStartDelay);
 	this->Trace(buf);
@@ -979,21 +1005,40 @@ FANCONTROL::ReadConfig(const char* configfile)
 			this->SmartLevels1[i].hystUp1   =  this->SmartLevels1[i].hystUp1   * 5 / 9;
 			this->SmartLevels1[i].hystDown1 =  this->SmartLevels1[i].hystDown1 * 5 / 9;
 		}
+		// Only when profile 2 is present (temp2[0] != 0). When it is absent the array
+		// is all-zero with NO -1 terminator (the terminator is written only when
+		// lcnt2 > 0), so an unguarded scan for -1 walked off the end of
+		// SmartLevels2[32] - an out-of-bounds write. Convert [0] and the rest together
+		// inside the guard (matching the SmartLevels/SmartLevels1 loops above), with an
+		// array-size cap as a belt-and-suspenders against a missing terminator.
 		if (this->SmartLevels2[0].temp2 != 0) {   // 0 = no 2nd profile present
-			this->SmartLevels2[0].temp2     = (this->SmartLevels2[0].temp2 - 32) * 5 / 9;
-			this->SmartLevels2[0].hystUp2   =  this->SmartLevels2[0].hystUp2   * 5 / 9;
-			this->SmartLevels2[0].hystDown2 =  this->SmartLevels2[0].hystDown2 * 5 / 9;
-		}
-		for (i = 1; this->SmartLevels2[i].temp2 != -1; i++) {
-			this->SmartLevels2[i].temp2     = (this->SmartLevels2[i].temp2 - 32) * 5 / 9;
-			this->SmartLevels2[i].hystUp2   =  this->SmartLevels2[i].hystUp2   * 5 / 9;
-			this->SmartLevels2[i].hystDown2 =  this->SmartLevels2[i].hystDown2 * 5 / 9;
+			for (i = 0; i < (int)ARRAYMAX(this->SmartLevels2) && this->SmartLevels2[i].temp2 != -1; i++) {
+				this->SmartLevels2[i].temp2     = (this->SmartLevels2[i].temp2 - 32) * 5 / 9;
+				this->SmartLevels2[i].hystUp2   =  this->SmartLevels2[i].hystUp2   * 5 / 9;
+				this->SmartLevels2[i].hystDown2 =  this->SmartLevels2[i].hystDown2 * 5 / 9;
+			}
 		}
 		//		for (i= 0; i<15; i++) {SensorOffset[i]= SensorOffset[i] * 5/9;}
 		this->IconLevels[0] = (this->IconLevels[0] - 32) * 5 / 9;
 		this->IconLevels[1] = (this->IconLevels[1] - 32) * 5 / 9;
 		this->IconLevels[2] = (this->IconLevels[2] - 32) * 5 / 9;
 	}
+
+	// Safety thresholds are entered in the display unit like the curves/IconLevels.
+	// Convert F->C when the config is Fahrenheit (0 = off must stay 0 -> guard >0),
+	// then sanity-check in Celsius regardless of the input unit. Done here, after the
+	// Fahrenheit block, because Fahrenheit is only known post-parse (see :839).
+	if (Fahrenheit) {
+		if (this->FailsafeTemp > 0) this->FailsafeTemp = (this->FailsafeTemp - 32) * 5 / 9;
+		if (this->CriticalTemp > 0) this->CriticalTemp = (this->CriticalTemp - 32) * 5 / 9;
+	}
+	// FailsafeTemp: 0 = off, else clamp to a sane ceiling (mirrors the Settings dialog,
+	// fancontrol.cpp:4237-4238). Catches an insane Celsius value too, not just F.
+	if (this->FailsafeTemp < 0)   this->FailsafeTemp = 0;
+	if (this->FailsafeTemp > 120) this->FailsafeTemp = 120;
+	// CriticalTemp: only a sane Celsius window arms it; anything else = off (preserves
+	// the original parse-time semantics, now applied after conversion).
+	this->CriticalTemp = (this->CriticalTemp >= 70 && this->CriticalTemp <= 110) ? this->CriticalTemp : 0;
 
 	this->Trace("");
 

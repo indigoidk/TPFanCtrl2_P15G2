@@ -77,15 +77,21 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 	// wait for IBF and OBF to clear
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF | ACPI_EC_FLAG_OBF)) {
 		this->Trace("readec: timed out #1");
-		if (this->EC_CTRL == ACPI_EC_TYPE1_CTRLPORT) {
-			this->EC_CTRL = ACPI_EC_TYPE2_CTRLPORT;
-			this->EC_DATA = ACPI_EC_TYPE2_DATAPORT;
-			this->Trace("Now using ACPI_EC_TYPE2");
-		}
-		else {
-			this->EC_CTRL = ACPI_EC_TYPE1_CTRLPORT;
-			this->EC_DATA = ACPI_EC_TYPE1_DATAPORT;
-			this->Trace("Now using ACPI_EC_TYPE1");
+		// Only probe the alternate EC port pair until the transport is confirmed.
+		// Once a read has succeeded the type is KNOWN, so a later transient busy /
+		// timeout must NOT flip it - doing so turned an ordinary stall into a
+		// permanent protocol switch that poisoned every following transaction (H-02).
+		if (!this->m_ecTypeKnown) {
+			if (this->EC_CTRL == ACPI_EC_TYPE1_CTRLPORT) {
+				this->EC_CTRL = ACPI_EC_TYPE2_CTRLPORT;
+				this->EC_DATA = ACPI_EC_TYPE2_DATAPORT;
+				this->Trace("Now using ACPI_EC_TYPE2");
+			}
+			else {
+				this->EC_CTRL = ACPI_EC_TYPE1_CTRLPORT;
+				this->EC_DATA = ACPI_EC_TYPE1_DATAPORT;
+				this->Trace("Now using ACPI_EC_TYPE1");
+			}
 		}
 		return false;
 	}
@@ -115,11 +121,17 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 	// a healthy EC has OBF set already and returns immediately.
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_OBF, true, 100)) {
 		this->Trace("readec: timed out #4 (OBF)");
+		// Drain any late/stale output byte so it cannot be mis-consumed as the NEXT
+		// transaction's result (H-01). Reading the data port clears OBF; the value
+		// is discarded because this read has already failed.
+		if (ReadPort(this->EC_CTRL) & ACPI_EC_FLAG_OBF)
+			(void)ReadPort(this->EC_DATA);
 		return false;
 	}
 
 	*pdata = ReadPort(this->EC_DATA);
 
+	this->m_ecTypeKnown = true;   // transport confirmed; stop probing the alternate ports
 	return TRUE;
 }
 
