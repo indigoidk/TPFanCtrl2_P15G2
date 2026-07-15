@@ -381,7 +381,18 @@ void WorkerThread(void *dummy) {
 						MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
 	}
 
-	if (g_PortIo) {
+	// Free the transport ONLY on the !ok path: there Open() never succeeded, so
+	// no FANCONTROL and no per-poll EC worker thread was ever created and the
+	// delete is race-free. On the ok path the worker thread can, in a rare
+	// pathological case, outlive its bounded join timeout (the exit handlers
+	// proceed on timeout, fancontrol.cpp), and deleting the transport under a
+	// still-live worker would be a use-after-free - the old global-function
+	// TVicPort path made the identical race harmless, a heap-owned transport does
+	// not. On that path g_PortIo->Close() (above) already released the driver +
+	// mutex handles; the small object is reclaimed by the OS at process exit, and
+	// g_PortIo is left non-NULL so any late worker read fails cleanly via the
+	// closed transport instead of NULL-dereferencing.
+	if (!ok && g_PortIo) {
 		delete g_PortIo;
 		g_PortIo = NULL;
 	}

@@ -42,10 +42,13 @@ class IPortIo {
 public:
 	virtual ~IPortIo() {}
 
-	// Threading contract: ReadPort8/WritePort8 and Begin/EndEcTransaction must
-	// not run concurrently with Close() or destruction. The application stops
-	// and quiesces its single EC worker before final Close(); this shutdown
-	// discipline makes the implementation's lock-free fast paths safe.
+	// Threading contract: DESTRUCTION (delete / ~IPortIo) must not race the EC
+	// worker - the app destroys the transport only when no worker thread can
+	// exist (approot.cpp deletes it solely on the startup-failure path; on a
+	// normal exit it Close()s and lets the OS reclaim the small object at process
+	// end). Close() ITSELF may run concurrently with a straggler ReadPort8/
+	// WritePort8: the implementation serializes them internally, so a late port
+	// op after Close() fails cleanly rather than racing.
 
 	// Open the driver, (re)start its demand-start service if needed, load the
 	// signed module, and become ready for port I/O. FALSE = PawnIO unavailable
