@@ -39,7 +39,6 @@ static void EmergencyHibernate() {
 	}
 	::SetSuspendState(TRUE /*hibernate*/, TRUE, FALSE);
 }
-#include "TVicPort.h"
 #include "fanlogic.h"   // pure decision logic (unit-tested in tests/fanlogic_tests.cpp)
 
 #define TP_ECOFFSET_FAN         (char)0x2F    // 1 byte (binary xyzz zzz)
@@ -271,7 +270,7 @@ FANCONTROL::HandleData(void) {
 	}
 
 	// compose the richer multi-line tray tooltip (mode / max temp / fan / active
-	// profile, plus game + EC-error flags). Title2 stays the single-line title.
+	// profile, plus fail-safe + EC-error flags). Title2 stays the single-line title.
 	{
 		char dT[16];
 		FmtTemp(dT, sizeof(dT),
@@ -302,10 +301,6 @@ FANCONTROL::HandleData(void) {
 		char extra[64] = "";
 		if (this->m_failsafeTripped)
 			strcpy_s(extra, sizeof(extra), "FAIL-SAFE: fan forced max");
-		if (this->m_driversHidden) {
-			if (extra[0]) strcat_s(extra, sizeof(extra), "   ");
-			strcat_s(extra, sizeof(extra), "Game mode");
-		}
 		if (this->m_ecErrorsTotal > 0) {
 			if (extra[0]) strcat_s(extra, sizeof(extra), "   ");
 			sprintf_s(extra + strlen(extra), sizeof(extra) - strlen(extra),
@@ -902,141 +897,39 @@ FANCONTROL::ReadEcRaw(FCSTATE* pfcstate) {
 
 	memset(pfcstate->Sensors, 0, sizeof(pfcstate->Sensors));
 
-	if (!this->UseTWR) {
-		
-		idxtemp = 0;
+	idxtemp = 0;
 
-		for (i = 0; i < 8; i++) {    // temp sensors 0x78 - 0x7f
-			pfcstate->SensorAddr[idxtemp] = TP_ECOFFSET_TEMP0 + i;
+	for (i = 0; i < 8; i++) {    // temp sensors 0x78 - 0x7f
+		pfcstate->SensorAddr[idxtemp] = TP_ECOFFSET_TEMP0 + i;
 
-			pfcstate->SensorName[idxtemp] = this->gSensorNames[idxtemp];
+		pfcstate->SensorName[idxtemp] = this->gSensorNames[idxtemp];
 
-			// store the raw EC reading; bias (if any) is applied later via
-			// BiasedTemp() so display and fan decisions stay consistent.
-			if (!ReadByteFromEC(TP_ECOFFSET_TEMP0 + i, &pfcstate->Sensors[idxtemp])) {
-				this->Trace("failed to read a TEMP0 byte from EC");
-				return false;
-			}
-
-			idxtemp++;
-		}
-
-		for (i = 0; i < 4; i++) {    // temp sensors 0xC0 - 0xC4
-			pfcstate->SensorAddr[idxtemp] = TP_ECOFFSET_TEMP1 + i;
-
-			pfcstate->SensorName[idxtemp] = "n/a";
-
-			if (!this->NoExtSensor) {
-				pfcstate->SensorName[idxtemp] = this->gSensorNames[idxtemp];
-
-				// store the raw reading; bias applied later via BiasedTemp()
-				if (!ReadByteFromEC(TP_ECOFFSET_TEMP1 + i, &pfcstate->Sensors[idxtemp])) {
-					this->Trace("failed to read a TEMP1 byte from EC");
-					return false;
-				}
-			}
-
-			idxtemp++;
-		}
-	}
-	else {
-		char data = -1;
-		char dataOut[16];
-		int iOK = false;
-		int iTimeout = 100;
-		int iTimeoutBuf = 1000;
-		int iTime = 0;
-		int iTick = 10;
-		int iNumTry = 0;
-
-	retry:
-		iNumTry++;
-
-		if (iNumTry >= 3) {
-			this->Trace("failed to read temps , EC is not ready for TWR");
+		// store the raw EC reading; bias (if any) is applied later via
+		// BiasedTemp() so display and fan decisions stay consistent.
+		if (!ReadByteFromEC(TP_ECOFFSET_TEMP0 + i, &pfcstate->Sensors[idxtemp])) {
+			this->Trace("failed to read a TEMP0 byte from EC");
 			return false;
 		}
 
-		for (iTime = 0; iTime < iTimeoutBuf; iTime += iTick) {    // wait for ec ready
-			data = (char)ReadPort(0x1604) & 0xff;                // or timeout iTimeoutBuf = 1000
-			if (!data)                                            // ec is ready: ctrlprt = 0
-				break;
-			if (data & 0x50)                                    // some unrequested outputis waiting
-				ReadPort(0x161f);                                // clear data output
-			::Sleep(iTick);
+		idxtemp++;
+	}
+
+	for (i = 0; i < 4; i++) {    // temp sensors 0xC0 - 0xC4
+		pfcstate->SensorAddr[idxtemp] = TP_ECOFFSET_TEMP1 + i;
+
+		pfcstate->SensorName[idxtemp] = "n/a";
+
+		if (!this->NoExtSensor) {
+			pfcstate->SensorName[idxtemp] = this->gSensorNames[idxtemp];
+
+			// store the raw reading; bias applied later via BiasedTemp()
+			if (!ReadByteFromEC(TP_ECOFFSET_TEMP1 + i, &pfcstate->Sensors[idxtemp])) {
+				this->Trace("failed to read a TEMP1 byte from EC");
+				return false;
+			}
 		}
 
-		WritePort(0x1610, 0x20);                            // tell them we want to read
-		data = (char)ReadPort(0x1604) & 0xff;
-		if (!(data & 0x20))                                    // ec is not ready
-			goto retry;
-
-		for (int i = 1; i < 15; i++) {
-			WritePort(0x1610 + i, 0x00);
-		}
-
-		WritePort(0x161f, 0x00);
-
-		for (iTime = 0; iTime < iTimeoutBuf; iTime++) {            // wait for full buffers to clear
-			data = (char)ReadPort(0x1604) & 0xff;                // or timeout iTimeoutBuf = 1000
-			if (data == 0x50)
-				break;
-		}
-
-		if (data != 0x50)
-			goto retry;
-
-		for (int i = 0; i < 16; i++) {
-			dataOut[i] = (char)ReadPort(0x1610 + i) & 0xff;
-		}
-
-		pfcstate->SensorAddr[0] = 0x78;
-		pfcstate->SensorName[0] = this->gSensorNames[0];
-		pfcstate->Sensors[0] = dataOut[0];
-
-		pfcstate->SensorAddr[1] = 0x79;
-		pfcstate->SensorName[1] = this->gSensorNames[1];
-		pfcstate->Sensors[1] = dataOut[1];
-
-		pfcstate->SensorAddr[2] = 0x7a;
-		pfcstate->SensorName[2] = this->gSensorNames[2];
-		pfcstate->Sensors[2] = dataOut[2];
-
-		pfcstate->SensorAddr[3] = 0x7b;
-		pfcstate->SensorName[3] = this->gSensorNames[3];
-		pfcstate->Sensors[3] = dataOut[3];
-
-		pfcstate->SensorAddr[4] = 0x7c;
-		pfcstate->SensorName[4] = this->gSensorNames[4];
-		pfcstate->Sensors[4] = dataOut[4];
-
-		pfcstate->SensorAddr[5] = 0x7d;
-		pfcstate->SensorName[5] = this->gSensorNames[5];
-		pfcstate->Sensors[5] = dataOut[6];
-
-		pfcstate->SensorAddr[6] = 0x7e;
-		pfcstate->SensorName[6] = this->gSensorNames[6];
-		pfcstate->Sensors[6] = dataOut[8];
-
-		pfcstate->SensorAddr[7] = 0x7f;
-		pfcstate->SensorName[7] = this->gSensorNames[7];
-		pfcstate->Sensors[7] = dataOut[9];
-
-		pfcstate->SensorAddr[8] = 0xc0;
-		pfcstate->SensorName[8] = this->gSensorNames[8];
-		pfcstate->Sensors[8] = dataOut[10];
-
-		pfcstate->SensorAddr[9] = 0xc1;
-		pfcstate->SensorName[9] = this->gSensorNames[9];
-		pfcstate->Sensors[9] = dataOut[11];
-
-		pfcstate->SensorAddr[10] = 0xc2;
-		pfcstate->SensorName[10] = this->gSensorNames[10];
-		pfcstate->Sensors[10] = dataOut[12];
-
-		pfcstate->SensorAddr[11] = 0xc3;
-		pfcstate->SensorName[11] = this->gSensorNames[11];
-		pfcstate->Sensors[11] = dataOut[13];
+		idxtemp++;
 	}
 
 	return ok;

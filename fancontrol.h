@@ -228,7 +228,7 @@ protected:
 	BOOL m_layoutInit;   // base geometry captured yet?
 	int  m_baseCW, m_baseCH;   // design-time client size
 	int  m_minW, m_minH;       // minimum window size (= design size)
-	RECT m_baseRC[20];   // design-time control rects (client coords)
+	RECT m_baseRC[19];   // design-time control rects (client coords)
 	void ReflowLayout();       // re-anchor controls on WM_SIZE
 	// PerMonitorV2 DPI state
 	UINT m_curDpi;       // current window DPI (96 = 100%)
@@ -275,7 +275,6 @@ protected:
 	void ApplyTaskbarPresence();      // (un)join the taskbar per ShowInTaskbar
 	void ApplyLogVisibility();   // show/hide Log + shrink/restore window width
 	void UpdateTempList();   // repopulate RichEdit 8101 with per-sensor colors
-	void ToggleGameMode(bool silent = false);   // hide/restore TVic driver files; silent on exit/shutdown
 	void ShowSettingsDialog();   // modal in-app settings editor (writes TPFanControl.ini)
 	static INT_PTR CALLBACK SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 	bool ApplySettingsFromDialog(HWND hwnd);   // shared by OK and Apply; false = a value was out of range
@@ -329,7 +328,6 @@ protected:
 	// edit-box path so the warning can't be bypassed by typing the value.
 	bool ConfirmMaxFan();
 
-	bool m_driversHidden = false;    // true when TVic .sys files are renamed to .bak
 	char m_tempListSig[2048] = "";   // cache: skip RichEdit rebuild when nothing visible changed
 	int  m_tempListRows = -1;        // last applied temp-list row count; skip the auto-size reflow unless it changes
 	int  m_lastManualEnabled = -1;   // last applied manual-controls enabled state (-1 = unknown, forces first apply)

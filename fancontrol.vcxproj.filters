@@ -36,6 +36,9 @@
     <ClCompile Include="portio.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="portio_pawn.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="SystemTraySDK.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -56,6 +59,9 @@
     <ClInclude Include="fancontrol.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="portio_pawn.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="res\resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -66,9 +72,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="tools.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="TVicPort.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="winstuff.h">
@@ -117,9 +120,6 @@
     <ResourceCompile Include="res\fancontrol.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="TVicPort.lib" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="res\xp-manifest.txt" />

@@ -69,7 +69,6 @@ BEGIN
     CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,45,94,31,10
     CONTROL         "Show &log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP | WS_GROUP,7,200,44,10
     CONTROL         "&Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,52,200,48,10
-    CONTROL         "&Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,200,98,10
     PUSHBUTTON      "Se&ttings",5100,201,198,46,14
     LTEXT           "Temperature history",9202,12,214,157,9
     CONTROL         "",8120,"Static",SS_OWNERDRAW | SS_NOTIFY,12,224,546,18
@@ -148,7 +147,6 @@ BEGIN
     CONTROL         "active",7002,"Button",BS_AUTORADIOBUTTON | BS_RIGHT,46,94,31,10
     CONTROL         "Show &log",7011,"Button",BS_AUTOCHECKBOX | WS_TABSTOP | WS_GROUP,7,200,44,10
     CONTROL         "&Dark mode",7012,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,52,200,48,10
-    CONTROL         "&Game mode (Hide Drivers)",7013,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,200,98,10
     PUSHBUTTON      "Se&ttings",5100,201,198,46,14
     LTEXT           "Temperature history",9202,12,214,157,9
     CONTROL         "",8120,"Static",SS_OWNERDRAW | SS_NOTIFY,12,224,546,18
@@ -323,8 +321,6 @@ BEGIN
     MENUITEM "Edit Fan &Curve...",          5110
     MENUITEM "Open &Log File",              5120
     MENUITEM "Open Co&nfig (ini)",          5130
-    MENUITEM SEPARATOR
-    MENUITEM "&Game Mode (Hide Drivers)",   5090
     MENUITEM SEPARATOR
     MENUITEM "&BIOS Mode",                  5001
     MENUITEM "S&mart Mode",                 5002

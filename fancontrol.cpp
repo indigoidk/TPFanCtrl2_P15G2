@@ -129,6 +129,9 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	// log-tail lock first: Trace() can run (and record) before the window or
 	// any other state exists
 	::InitializeCriticalSection(&this->m_logLock);
+	// The stock PawnIO module permits only the ACPI-spec TYPE2 EC pair.
+	this->EC_CTRL = 0x66;
+	this->EC_DATA = 0x62;
 
 	// theme defaults (overridable via TPFanControl.ini, toggled in-app)
 	this->ShowTempHex = 0;
@@ -141,25 +144,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	// read by UpdateTaskbarIndicators before the first successful EC poll
 	// assigns it in HandleData; BIOS bit = clean no-progress taskbar state
 	this->fanctrl2 = FAN_CTRL_BIOS;
-	// Detect if TVic drivers were left hidden (e.g., after a previous crash in game mode).
-	// Require both files to be absent/backed-up; a partial state leaves m_driversHidden false.
-	// Disable WOW64 FS redirection: this is a 32-bit process; without this, System32 maps to
-	// SysWOW64 and the driver files are never found.
-	{
-		typedef BOOL (WINAPI *PFN_Disable)(PVOID*);
-		typedef BOOL (WINAPI *PFN_Revert)(PVOID);
-		HMODULE hK = ::GetModuleHandleA("kernel32.dll");
-		PFN_Disable pfnOff = hK ? (PFN_Disable)::GetProcAddress(hK, "Wow64DisableWow64FsRedirection") : NULL;
-		PFN_Revert  pfnOn  = hK ? (PFN_Revert) ::GetProcAddress(hK, "Wow64RevertWow64FsRedirection")  : NULL;
-		PVOID fsOld = NULL;
-		bool redir = pfnOff && pfnOff(&fsOld);
-		this->m_driversHidden =
-			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicHW64.sys")       == INVALID_FILE_ATTRIBUTES) &&
-			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicHW64.sys.bak")   != INVALID_FILE_ATTRIBUTES) &&
-			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicPort64.sys")     == INVALID_FILE_ATTRIBUTES) &&
-			(::GetFileAttributesA("C:\\Windows\\System32\\drivers\\TVicPort64.sys.bak") != INVALID_FILE_ATTRIBUTES);
-		if (redir) pfnOn(fsOld);
-	}
 	this->m_hbrDlg = NULL;
 	this->m_hbrField = NULL;
 	this->m_hbrRule = NULL;
@@ -393,7 +377,7 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	// the *final* window (after the optional slim-dialog swap above), so the tips
 	// are not orphaned by that rebuild. AddTip creates the shared tip window on
 	// first call and silently skips controls a given layout doesn't have, so the
-	// slim dialogs (no Fan 1/2, Game Mode, etc.) just get the subset that applies.
+	// slim dialogs (no Fan 1/2, etc.) just get the subset that applies.
 	this->AddTip(8100, "Current fan-control state read back from the embedded "
 	                   "controller (e.g. the active fan level or BIOS auto mode).");
 	this->AddTip(8103, "Switch: the raw fan-control byte currently programmed into "
@@ -417,10 +401,6 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 	this->AddTip(7002, "Show only sensors that currently report a live reading.");
 	// (no static tip on the sparkline 8120: it has a live tracking tooltip that
 	// shows the hovered sample's value and age - see SparkSubclassProc)
-	this->AddTip(7013, "Renames TVicHW64.sys and TVicPort64.sys to .sys.bak "
-	                   "in System32\\drivers, hiding them from Valorant's Vanguard "
-	                   "anti-cheat (ring 0 kernel access). Files are automatically "
-	                   "restored when Game Mode is disabled or the app exits cleanly.");
 	this->AddTip(5100, "Open Settings: poll interval, icon color thresholds, thermal "
 	                   "fail-safe and the fan curve.");
 	this->AddTip(7011, "Show or hide the scrolling Log panel on the right side of the window.");
@@ -892,9 +872,6 @@ FANCONTROL::ShowTrayMenu(const POINT* anchor) {
 	if (IsWindowVisible(this->hwndDialog))
 		m.DeleteMenuItem(5010);
 
-	if (this->m_driversHidden)
-		m.CheckMenuItem(5090);
-
 	if (this->ShowTempIcon == 0)
 		m.DeleteMenuItem(5070);
 
@@ -986,9 +963,6 @@ FANCONTROL::~FANCONTROL() {
 		this->m_hEvtSub = NULL;
 	}
 
-	if (this->m_driversHidden)
-		this->ToggleGameMode(true);   // restore TVic drivers on clean exit (no UI)
-
 	if (this->m_hwndTip) {
 		::DestroyWindow(this->m_hwndTip);
 		this->m_hwndTip = NULL;
@@ -1050,7 +1024,7 @@ FANCONTROL::~FANCONTROL() {
 	if (pTextIconMutex)
 		delete pTextIconMutex;
 
-	// last: ToggleGameMode/Trace above may still have recorded into the ring
+	// release the log-tail lock last
 	::DeleteCriticalSection(&this->m_logLock);
 }
 
@@ -1588,8 +1562,6 @@ FANCONTROL::InitThemeAndChrome() {
 	::SendDlgItemMessage(this->hwndDialog, 7010, BM_SETCHECK, this->ShowTempHex ? BST_CHECKED : BST_UNCHECKED, 0);
 	::SendDlgItemMessage(this->hwndDialog, 7011, BM_SETCHECK, this->ShowLog ? BST_CHECKED : BST_UNCHECKED, 0);
 	::SendDlgItemMessage(this->hwndDialog, 7012, BM_SETCHECK, this->DarkMode ? BST_CHECKED : BST_UNCHECKED, 0);
-	::SendDlgItemMessage(this->hwndDialog, 7013, BM_SETCHECK, this->m_driversHidden ? BST_CHECKED : BST_UNCHECKED, 0);
-
 	// manual-speed slider: positions 0..7 = fan 0..7, position 8 = 64 (max)
 	HWND hSld = ::GetDlgItem(this->hwndDialog, 8311);
 	if (hSld) {
@@ -1663,144 +1635,6 @@ FANCONTROL::ApplyLogVisibility() {
 	// the panel may have just opened: backfill it from the log tail so it
 	// shows the recent history instead of starting empty
 	this->FlushLogToControl();
-}
-
-//-------------------------------------------------------------------------
-//  hide or restore TVic driver files to avoid Riot Vanguard detection
-//-------------------------------------------------------------------------
-void
-FANCONTROL::ToggleGameMode(bool silent) {
-	// Confirm before HIDING drivers in an interactive toggle: this renames kernel
-	// drivers in System32, a privileged system-wide change. Restore, and any
-	// silent (exit/shutdown) call, is never gated.
-	if (!silent && !this->m_driversHidden) {
-		int a = ModernConfirm(this->hwndDialog,
-			L"Enable Game Mode (Hide Drivers)",
-			L"Hide the TVic kernel drivers?",
-			L"Game Mode renames the TVicHW64 / TVicPort64 kernel drivers in "
-			L"C:\\Windows\\System32\\drivers so anti-cheat software (e.g. "
-			L"Vanguard) cannot see them.\n\n"
-			L"While hidden, fan control still works, but the drivers are only "
-			L"restored on a clean exit (or recovered automatically on the next "
-			L"launch).",
-			TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON,
-			"Game Mode renames the TVicHW64 / TVicPort64 kernel drivers in\r\n"
-			"C:\\Windows\\System32\\drivers so anti-cheat software (e.g. Vanguard)\r\n"
-			"cannot see them.\r\n\r\n"
-			"While hidden, fan control still works, but the drivers are only\r\n"
-			"restored on a clean exit (or recovered automatically on the next\r\n"
-			"launch). Continue?",
-			"Enable Game Mode (Hide Drivers)", MB_OKCANCEL | MB_ICONWARNING);
-		if (a != IDOK) {
-			// keep the in-window checkbox in sync with the unchanged (not-hidden) state
-			::SendDlgItemMessage(this->hwndDialog, 7013, BM_SETCHECK, BST_UNCHECKED, 0);
-			return;
-		}
-	}
-
-	static const char* const sys[2] = {
-		"C:\\Windows\\System32\\drivers\\TVicHW64.sys",
-		"C:\\Windows\\System32\\drivers\\TVicPort64.sys"
-	};
-
-	// Disable WOW64 FS redirection: this 32-bit process normally sees SysWOW64 as System32;
-	// driver files live in the real System32\drivers so we must bypass the redirector.
-	typedef BOOL (WINAPI *PFN_Disable)(PVOID*);
-	typedef BOOL (WINAPI *PFN_Revert)(PVOID);
-	HMODULE hK = ::GetModuleHandleA("kernel32.dll");
-	PFN_Disable pfnOff = hK ? (PFN_Disable)::GetProcAddress(hK, "Wow64DisableWow64FsRedirection") : NULL;
-	PFN_Revert  pfnOn  = hK ? (PFN_Revert) ::GetProcAddress(hK, "Wow64RevertWow64FsRedirection")  : NULL;
-	PVOID fsOld = NULL;
-	bool redir = pfnOff && pfnOff(&fsOld);
-
-	DWORD lastErr = 0;
-	bool ok = true;
-	if (!this->m_driversHidden) {
-		// Hide: rename .sys -> .sys.bak, replacing any stale .bak from a prior manual rename
-		bool moved[2] = { false, false };   // track successes for rollback
-		for (int i = 0; i < 2; i++) {
-			char bak[MAX_PATH];
-			strcpy_s(bak, sizeof(bak), sys[i]);
-			strcat_s(bak, sizeof(bak), ".bak");
-			if (::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES) {
-				if (!::MoveFileExA(sys[i], bak, MOVEFILE_REPLACE_EXISTING))
-					{ lastErr = ::GetLastError(); ok = false; break; }
-				moved[i] = true;
-			}
-		}
-		if (!ok) {
-			// partial failure: undo the renames that did succeed so we never
-			// leave one driver hidden with m_driversHidden=false (which would
-			// skip restoration in the destructor / on the next toggle)
-			for (int i = 0; i < 2; i++) {
-				if (!moved[i]) continue;
-				char bak[MAX_PATH];
-				strcpy_s(bak, sizeof(bak), sys[i]);
-				strcat_s(bak, sizeof(bak), ".bak");
-				::MoveFileExA(bak, sys[i], MOVEFILE_REPLACE_EXISTING);
-			}
-		}
-		if (ok) {
-			this->m_driversHidden = true;
-			// Crash safety net: if we never get to restore (app uninstalled/moved, or
-			// a crash with a reboot), have the OS rename each .sys.bak back at the very
-			// next boot - smss.exe runs pending renames before any driver loads. A clean
-			// in-session restore moves the .sys back first, making this a harmless no-op.
-			// (No REPLACE_EXISTING: never clobber a .sys that Windows Update reinstalled.)
-			for (int i = 0; i < 2; i++) {
-				char bakd[MAX_PATH];
-				strcpy_s(bakd, sizeof(bakd), sys[i]);
-				strcat_s(bakd, sizeof(bakd), ".bak");
-				::MoveFileExA(bakd, sys[i], MOVEFILE_DELAY_UNTIL_REBOOT);
-			}
-			if (!silent && this->pTaskbarIcon && !this->NoBallons)
-				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
-					"Game Mode ON",
-					"TVic drivers hidden - safe to launch Riot games.", 8000);
-		} else if (!silent) {
-			char msg[256];
-			sprintf_s(msg, sizeof(msg),
-				"Could not hide TVic drivers (error %lu).\n\nTPFanControl v2.34 P15G2 Dual must run with administrator privileges for Game Mode.",
-				lastErr);
-			::MessageBoxA(this->hwndDialog, msg, "Game Mode", MB_OK | MB_ICONWARNING);
-		}
-	} else {
-		// Restore: rename .sys.bak -> .sys
-		// If .sys already exists alongside .bak (mixed state), just delete the stale .bak.
-		for (int i = 0; i < 2; i++) {
-			char bak[MAX_PATH];
-			strcpy_s(bak, sizeof(bak), sys[i]);
-			strcat_s(bak, sizeof(bak), ".bak");
-			if (::GetFileAttributesA(bak) != INVALID_FILE_ATTRIBUTES) {
-				if (::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES) {
-					// .sys already present; stale .bak - just remove it
-					::DeleteFileA(bak);
-				} else {
-					if (!::MoveFileExA(bak, sys[i], 0))
-						{ lastErr = ::GetLastError(); ok = false; break; }
-				}
-			}
-		}
-		if (ok) {
-			this->m_driversHidden = false;
-			if (!silent && this->pTaskbarIcon && !this->NoBallons)
-				this->pTaskbarIcon->SetBalloon(NIIF_INFO,
-					"Game Mode OFF",
-					"TVic drivers restored. TPFanControl v2.34 P15G2 Dual running normally.", 8000);
-		} else if (!silent) {
-			char msg[256];
-			sprintf_s(msg, sizeof(msg),
-				"Could not restore TVic drivers (error %lu).\n\nCheck C:\\Windows\\System32\\drivers for .sys.bak files.",
-				lastErr);
-			::MessageBoxA(this->hwndDialog, msg, "Game Mode", MB_OK | MB_ICONWARNING);
-		}
-	}
-
-	if (redir) pfnOn(fsOld);
-
-	// Sync the in-dialog checkbox to actual state (handles both click-from-checkbox and tray-menu)
-	::SendDlgItemMessage(this->hwndDialog, 7013, BM_SETCHECK,
-		this->m_driversHidden ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
 //-------------------------------------------------------------------------
@@ -1984,7 +1818,7 @@ FANCONTROL::ReflowLayout() {
 	if (!this->hwndDialog) return;
 
 	// id, then anchor flags: add dW to x/w, dH to y/h
-	static const struct { int id, ax, ay, aw, ah; } A[20] = {
+	static const struct { int id, ax, ay, aw, ah; } A[19] = {
 		{ 9198, 0, 0, 0, 0 },   // 'Temperatures' header: fixed top-left
 		{ 8101, 0, 0, 0, 1 },   // temperature list:   grow height
 		{ 7001, 0, 1, 0, 0 },   // 'all'    radio: follow bottom
@@ -1998,7 +1832,6 @@ FANCONTROL::ReflowLayout() {
 		{ 7010, 0, 1, 0, 0 },   // Temp hex checkbox: follow bottom
 		{ 7011, 0, 1, 0, 0 },   // Show log checkbox: follow bottom
 		{ 7012, 0, 1, 0, 0 },   // Dark mode checkbox: follow bottom
-		{ 7013, 0, 1, 0, 0 },   // Game mode checkbox: follow bottom
 		{ 9202, 0, 1, 0, 0 },   // 'Temperature history' header: follow bottom
 		{ 8120, 0, 1, 1, 0 },   // sparkline:          follow bottom, grow width
 		{ 5100, 0, 1, 0, 0 },   // Settings button: follow bottom (fixed pos/size)
@@ -2030,7 +1863,7 @@ FANCONTROL::ReflowLayout() {
 				if (narrow > 200) this->m_minW = narrow;
 			}
 		}
-		for (int i = 0; i < 20; i++) {
+		for (int i = 0; i < 19; i++) {
 			HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 			RECT r = { 0, 0, 0, 0 };
 			if (h) {
@@ -2046,8 +1879,8 @@ FANCONTROL::ReflowLayout() {
 	int dW = cw - this->m_baseCW;
 	int dH = ch - this->m_baseCH;
 
-	HDWP hdwp = ::BeginDeferWindowPos(20);
-	for (int i = 0; i < 20; i++) {
+	HDWP hdwp = ::BeginDeferWindowPos(19);
+	for (int i = 0; i < 19; i++) {
 		HWND h = ::GetDlgItem(this->hwndDialog, A[i].id);
 		if (!h) continue;
 		// the temp list + all/active radios are sized to their content by
@@ -3464,10 +3297,6 @@ FANCONTROL::DlgProc(HWND
 					this->ApplyTheme();
 					break;
 
-				case 7013: // Game mode checkbox
-					this->ToggleGameMode();
-					break;
-
 				case 5001: // bios
 					this->ModeToDialog(1);
 					::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
@@ -3528,10 +3357,6 @@ FANCONTROL::DlgProc(HWND
 
 				case 5030: // hide window
 					this->ShowMainWindow(false);
-					break;
-
-				case 5090: // game mode toggle
-					this->ToggleGameMode();
 					break;
 
 				case 5100: // settings dialog
@@ -3640,12 +3465,6 @@ FANCONTROL::DlgProc(HWND
 	case WM_ENDSESSION:  //WM_QUERYENDSESSION?
 	//if running as service do not end
 		if (!this->Runs_as_service) {
-			// mp1 (wParam) == TRUE means Windows is actually shutting down.
-			// After this handler returns the process can be killed, so restore
-			// drivers here rather than relying on the destructor path.
-			if (mp1 && this->m_driversHidden)
-				this->ToggleGameMode(true);   // silent: no modal dialog can stall shutdown
-
 			// end program
 			// Wait for the work thread to terminate (capture the result: we must
 			// not close a handle to a thread that is still alive)

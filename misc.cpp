@@ -720,6 +720,11 @@ FANCONTROL::ReadConfig(const char* configfile)
 
 		fclose(f);
 
+		if (this->UseTWR != 0) {
+			this->Trace("UseTWR is unsupported on the PawnIO backend; using standard per-register temp reads");
+			this->UseTWR = 0;
+		}
+
 		// end marker for smart levels array
 		if (lcnt1) {
 			this->SmartLevels[lcnt1].temp = -1;

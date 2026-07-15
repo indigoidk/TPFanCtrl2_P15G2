@@ -1,4 +1,4 @@
-﻿// --------------------------------------------------------------
+// --------------------------------------------------------------
 //
 //  Thinkpad Fan Control
 //
@@ -8,24 +8,26 @@
 //
 //	The author claims no copyright, copyleft, license or
 //	whatsoever for the program itself (with exception of
-//	WinIO driver).  You may use, reuse or distribute it's 
-//	binaries or source code in any desired way or form,  
-//	Useage of binaries or source shall be entirely and 
-//	without exception at your own risk. 
-// 
+//	WinIO driver).  You may use, reuse or distribute it's
+//	binaries or source code in any desired way or form,
+//	Useage of binaries or source shall be entirely and
+//	without exception at your own risk.
+//
 // --------------------------------------------------------------
 
 #include "_prec.h"
 #include "fancontrol.h"
-#include "TVicPort.h"
+#include "portio_pawn.h"
 
-// Registers of the embedded controller
-// V0.6.3+ V.2.2.0+
-constexpr auto ACPI_EC_TYPE1_CTRLPORT = 0x1604;
-constexpr auto ACPI_EC_TYPE1_DATAPORT = 0x1600  ;
-// V0.6.2 final
-constexpr auto ACPI_EC_TYPE2_CTRLPORT = 0x66  ;
-constexpr auto ACPI_EC_TYPE2_DATAPORT = 0x62   ;
+// Registers of the embedded controller.
+// PawnIO-only build: the stock LpcACPIEC module permits ONLY the ACPI-spec EC
+// pair (TYPE2, 0x66/0x62), so that is the sole pair used. The legacy TYPE1
+// pair (0x1604/0x1600) that the old TVicPort path preferred is not reachable
+// through PawnIO and is kept here only for reference.
+constexpr auto ACPI_EC_TYPE1_CTRLPORT = 0x1604;   // legacy, unused under PawnIO
+constexpr auto ACPI_EC_TYPE1_DATAPORT = 0x1600;   // legacy, unused under PawnIO
+constexpr auto ACPI_EC_TYPE2_CTRLPORT = 0x66;     // cmd/status (the only pair PawnIO allows)
+constexpr auto ACPI_EC_TYPE2_DATAPORT = 0x62;     // data
 
 // Embedded controller status register bits
 constexpr auto ACPI_EC_FLAG_OBF = 0x01	/* Output buffer full */;
@@ -40,17 +42,21 @@ constexpr auto ACPI_EC_BURST_DISABLE = (char)0x83;
 constexpr auto ACPI_EC_COMMAND_QUERY = (char)0x84;
 
 //--------------------------------------------------------------------------
-// wait for the desired status from the embedded controller (EC) via port io 
+// wait for the desired status from the embedded controller (EC) via the
+// PawnIO port-I/O transport
 //--------------------------------------------------------------------------
 static bool
 WaitForFlags(USHORT port, char flags, int onoff = false, int timeout = 1000) {
-	char data;
+	unsigned char data;
 
 	int time = 0, sleepTicks = 10;
 
 	// wait for flags to clear and reach desired state
 	for (time = 0; time < timeout; time += sleepTicks) {
-		data = ReadPort(port);
+		// A transport failure (dead handle / disallowed port) fails the wait
+		// immediately instead of spinning the full timeout; the caller's
+		// existing "timed out" retry / BIOS-fallback ladder then handles it.
+		if (!g_PortIo->ReadPort8(port, &data)) return false;
 
 		int flagstate = (data & flags) != 0;
 		int	wantedstate = onoff != 0;
@@ -63,41 +69,31 @@ WaitForFlags(USHORT port, char flags, int onoff = false, int timeout = 1000) {
 }
 
 //-------------------------------------------------------------------------
-// read a byte from the embedded controller (EC) via port io 
+// read a byte from the embedded controller (EC) via port io
 //-------------------------------------------------------------------------
 bool
 FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 
 	if (this->EC_CTRL == 0) {
-		this->EC_CTRL = ACPI_EC_TYPE1_CTRLPORT;
-		this->EC_DATA = ACPI_EC_TYPE1_DATAPORT;
-		this->Trace("Using ACPI_EC_TYPE1");
+		// PawnIO allows only the ACPI-spec pair, so default straight to TYPE2.
+		// The FANCONTROL ctor also pre-seeds these; this is a belt-and-braces
+		// init in case a hotkey-driven access races the ctor.
+		this->EC_CTRL = ACPI_EC_TYPE2_CTRLPORT;
+		this->EC_DATA = ACPI_EC_TYPE2_DATAPORT;
+		this->Trace("Using ACPI_EC_TYPE2");
 	}
 
 	// wait for IBF and OBF to clear
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF | ACPI_EC_FLAG_OBF)) {
 		this->Trace("readec: timed out #1");
-		// Only probe the alternate EC port pair until the transport is confirmed.
-		// Once a read has succeeded the type is KNOWN, so a later transient busy /
-		// timeout must NOT flip it - doing so turned an ordinary stall into a
-		// permanent protocol switch that poisoned every following transaction (H-02).
-		if (!this->m_ecTypeKnown) {
-			if (this->EC_CTRL == ACPI_EC_TYPE1_CTRLPORT) {
-				this->EC_CTRL = ACPI_EC_TYPE2_CTRLPORT;
-				this->EC_DATA = ACPI_EC_TYPE2_DATAPORT;
-				this->Trace("Now using ACPI_EC_TYPE2");
-			}
-			else {
-				this->EC_CTRL = ACPI_EC_TYPE1_CTRLPORT;
-				this->EC_DATA = ACPI_EC_TYPE1_DATAPORT;
-				this->Trace("Now using ACPI_EC_TYPE1");
-			}
-		}
 		return false;
 	}
 
 	// indicate read operation desired
-	WritePort(this->EC_CTRL, ACPI_EC_COMMAND_READ);
+	if (!g_PortIo->WritePort8((USHORT)this->EC_CTRL, ACPI_EC_COMMAND_READ)) {
+		this->Trace("readec: write READ command failed");
+		return false;
+	}
 
 	// wait for IBF to clear (command byte removed from EC's input queue)
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {
@@ -106,7 +102,10 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 	}
 
 	// indicate read operation desired location
-	WritePort(this->EC_DATA, offset);
+	if (!g_PortIo->WritePort8((USHORT)this->EC_DATA, (unsigned char)offset)) {
+		this->Trace("readec: write address failed");
+		return false;
+	}
 
 	// wait for IBF to clear (address byte removed from EC's input queue)
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {
@@ -124,14 +123,20 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 		// Drain any late/stale output byte so it cannot be mis-consumed as the NEXT
 		// transaction's result (H-01). Reading the data port clears OBF; the value
 		// is discarded because this read has already failed.
-		if (ReadPort(this->EC_CTRL) & ACPI_EC_FLAG_OBF)
-			(void)ReadPort(this->EC_DATA);
+		unsigned char status;
+		if (g_PortIo->ReadPort8((USHORT)this->EC_CTRL, &status) && (status & ACPI_EC_FLAG_OBF)) {
+			unsigned char discard;
+			(void)g_PortIo->ReadPort8((USHORT)this->EC_DATA, &discard);
+		}
 		return false;
 	}
 
-	*pdata = ReadPort(this->EC_DATA);
+	if (!g_PortIo->ReadPort8((USHORT)this->EC_DATA, pdata)) {
+		this->Trace("readec: data read failed");
+		return false;
+	}
 
-	this->m_ecTypeKnown = true;   // transport confirmed; stop probing the alternate ports
+	this->m_ecTypeKnown = true;   // a read has completed on this pair
 	return TRUE;
 }
 
@@ -144,11 +149,11 @@ FANCONTROL::WriteByteToEC(int offset, char NewData) {
 	// A SetFan() begins with EC writes, so a write can be the very first EC access
 	// (e.g. a hotkey/menu action racing the first poll). EC_CTRL/EC_DATA start at 0,
 	// and are otherwise only initialized inside ReadByteFromEC; initialize them here
-	// too, so we never drive WaitForFlags/WritePort against port 0.
+	// too, so we never drive WaitForFlags/WritePort8 against port 0.
 	if (this->EC_CTRL == 0) {
-		this->EC_CTRL = ACPI_EC_TYPE1_CTRLPORT;
-		this->EC_DATA = ACPI_EC_TYPE1_DATAPORT;
-		this->Trace("Using ACPI_EC_TYPE1");
+		this->EC_CTRL = ACPI_EC_TYPE2_CTRLPORT;
+		this->EC_DATA = ACPI_EC_TYPE2_DATAPORT;
+		this->Trace("Using ACPI_EC_TYPE2");
 	}
 
 	// wait for IBF and OBF to clear
@@ -158,7 +163,10 @@ FANCONTROL::WriteByteToEC(int offset, char NewData) {
 	}
 
 	// indicate write operation desired
-	WritePort(this->EC_CTRL, ACPI_EC_COMMAND_WRITE);
+	if (!g_PortIo->WritePort8((USHORT)this->EC_CTRL, ACPI_EC_COMMAND_WRITE)) {
+		this->Trace("writeec: write WRITE command failed");
+		return false;
+	}
 
 	// wait for IBF to clear (command byte removed from EC's input queue)
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {
@@ -167,7 +175,10 @@ FANCONTROL::WriteByteToEC(int offset, char NewData) {
 	}
 
 	// indicate write operation desired location
-	WritePort(this->EC_DATA, offset);
+	if (!g_PortIo->WritePort8((USHORT)this->EC_DATA, (unsigned char)offset)) {
+		this->Trace("writeec: write address failed");
+		return false;
+	}
 
 	// wait for IBF to clear (address byte removed from EC's input queue)
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {
@@ -176,7 +187,10 @@ FANCONTROL::WriteByteToEC(int offset, char NewData) {
 	}
 
 	// perform the write operation
-	WritePort(this->EC_DATA, NewData);
+	if (!g_PortIo->WritePort8((USHORT)this->EC_DATA, (unsigned char)NewData)) {
+		this->Trace("writeec: write data failed");
+		return false;
+	}
 
 	// wait for IBF to clear (data byte removed from EC's input queue)
 	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {

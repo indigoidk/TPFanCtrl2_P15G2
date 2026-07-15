@@ -1,17 +1,14 @@
 #include "_prec.h"
 #include "approot.h"
 #include "fancontrol.h"
-#include "TVicPort.h"
+#include "portio_pawn.h"
 
 int APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR aArgs, int) {
     hInstRes = instance;
     hInstApp = instance;
 
-    // Harden runtime DLL loads (e.g. LoadLibraryA("msftedit.dll")) against
-    // planting: search only System32 by name, never the (possibly user-writable)
-    // application directory. NOTE: this does NOT cover the load-time TVicPort.dll
-    // import, which the loader resolves before WinMain runs - that one is addressed
-    // by installing to a protected directory / code-signing, not by this call.
+    // Harden name-based runtime DLL loads (e.g. LoadLibraryA("msftedit.dll"))
+    // against planting: search only System32, never the application directory.
     ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
 
 	HANDLE hLock = CreateMutex(NULL,FALSE,"TPFanControlMutex01");
@@ -280,7 +277,7 @@ bool StartWorkerThread() {
 // still running EC/UI code, so we must NOT close its handle or let the caller
 // report the service as cleanly stopped.
 bool StopWorkerThread() {
-    // Abort the startup OpenTVicPort retry if we are still in it (g_dialogWnd not
+    // Abort the startup transport-open retry if we are still in it (g_dialogWnd not
     // yet set), so a stop arriving during boot doesn't hang on the wait below.
     if (g_stopEvent)
         ::SetEvent(g_stopEvent);
@@ -308,42 +305,6 @@ bool StopWorkerThread() {
         g_stopEvent = NULL;
     }
     return stopped;
-}
-
-// Crash recovery for Game Mode: if a previous session hid the TVic kernel drivers
-// (renamed *.sys -> *.sys.bak) but crashed or lost power before the clean-exit
-// restore ran, the drivers can't load and the OpenTVicPort retry below would fail
-// for 180s and then give up - bricking the app. Rename them back FIRST. Per-file
-// and unconditional so a partial (one .sys, one .bak) crash state heals too; Game
-// Mode is not persisted across runs, so "visible on startup" is the intended state.
-static void RecoverHiddenDrivers() {
-	static const char* const sys[2] = {
-		"C:\\Windows\\System32\\drivers\\TVicHW64.sys",
-		"C:\\Windows\\System32\\drivers\\TVicPort64.sys"
-	};
-	// 32-bit process: bypass WOW64 redirection so System32 is the real one.
-	typedef BOOL (WINAPI *PFN_Disable)(PVOID*);
-	typedef BOOL (WINAPI *PFN_Revert)(PVOID);
-	HMODULE hK = ::GetModuleHandleA("kernel32.dll");
-	PFN_Disable pfnOff = hK ? (PFN_Disable)::GetProcAddress(hK, "Wow64DisableWow64FsRedirection") : NULL;
-	PFN_Revert  pfnOn  = hK ? (PFN_Revert) ::GetProcAddress(hK, "Wow64RevertWow64FsRedirection")  : NULL;
-	PVOID fsOld = NULL;
-	bool redir = pfnOff && pfnOff(&fsOld);
-
-	for (int i = 0; i < 2; i++) {
-		char bak[MAX_PATH];
-		sprintf_s(bak, sizeof(bak), "%s.bak", sys[i]);
-		bool hasBak = ::GetFileAttributesA(bak)    != INVALID_FILE_ATTRIBUTES;
-		bool hasSys = ::GetFileAttributesA(sys[i]) != INVALID_FILE_ATTRIBUTES;
-		if (hasBak && !hasSys)
-			debug(::MoveFileExA(bak, sys[i], 0)
-				? "RecoverHiddenDrivers: restored a TVic driver from .sys.bak\r\n"
-				: "RecoverHiddenDrivers: FAILED to restore a TVic driver from .sys.bak\r\n");
-		else if (hasBak && hasSys)
-			::DeleteFileA(bak);   // stale .bak alongside a present .sys: clean it up
-	}
-
-	if (redir) pfnOn(fsOld);
 }
 
 void WorkerThread(void *dummy) {
@@ -378,30 +339,23 @@ void WorkerThread(void *dummy) {
 	}
 
     bool ok = false;
-	bool HardAccess = false;
-	bool NewHardAccess = true;
+	g_PortIo = CreatePawnIoTransport();
 
-	// Undo a Game-Mode crash before we touch the port: if the TVic drivers were
-	// left renamed to .sys.bak, restore them now or OpenTVicPort can't load them.
-	RecoverHiddenDrivers();
-
-    for (int i = 0; i < 180; i++) {
-        if (OpenTVicPort()) {
-            ok = true;
-            break;
-        }
-        // wait 1s, but abort immediately if a service stop was requested while
-        // we are still trying to open the port (before the dialog window exists)
-        if (g_stopEvent && ::WaitForSingleObject(g_stopEvent, 1000) == WAIT_OBJECT_0)
-            break;
-        if (!g_stopEvent)
-            ::Sleep(1000);
-    }
-	if (ok) {	
-		HardAccess = TestHardAccess();
-		SetHardAccess(NewHardAccess);
-		HardAccess = TestHardAccess();
-
+	if (g_PortIo) {
+		for (int i = 0; i < 180; i++) {
+			if (g_PortIo->Open()) {
+				ok = true;
+				break;
+			}
+			// wait 1s, but abort immediately if a service stop was requested while
+			// we are still trying to open the port (before the dialog window exists)
+			if (g_stopEvent && ::WaitForSingleObject(g_stopEvent, 1000) == WAIT_OBJECT_0)
+				break;
+			if (!g_stopEvent)
+				::Sleep(1000);
+		}
+	}
+	if (ok) {
 		LoadLibraryA("msftedit.dll");  // register RICHEDIT50W (RichEdit 4.1) for the temp list
 		FANCONTROL fc(hInstApp);
 
@@ -413,17 +367,23 @@ void WorkerThread(void *dummy) {
 		// destructor tears the window down so a concurrent service stop can't
 		// post to a window that is about to be (or already) destroyed
 		g_dialogWnd = NULL;
-		CloseTVicPort();
+		g_PortIo->Close();
 	}
 	else {
 		// a service can't meaningfully show a modal box (and shouldn't block on one);
 		// only pop the error in interactive mode
 		if (!g_SvcHandle)
 			::MessageBox(HWND_DESKTOP,
-						"Error during initialization of Port Driver.\r\n"
-						"(tvicport.sys missing in app folder or failed to load)",
+						"Error during initialization of the PawnIO port transport.\r\n"
+						"PawnIO may not be installed, LpcACPIEC.bin may be missing next to the executable,\r\n"
+						"or TPFanControl may not be running as Administrator.",
 						"Fan Control",
 						MB_ICONERROR | MB_OK | MB_SETFOREGROUND);
+	}
+
+	if (g_PortIo) {
+		delete g_PortIo;
+		g_PortIo = NULL;
 	}
 
 	// If running as a service and this exit was NOT triggered by an SCM stop (the

@@ -18,10 +18,9 @@ Grab the `TPFanControl-P15G2-*.zip`, unzip it anywhere, and run
 `TPFanControl.ini` (P15 Gen2 fan curve).
 
 > - Windows SmartScreen may warn about the unsigned exe → **More info → Run anyway**.
-> - You also need the **TVicPort** driver installed on the machine (see
->   [Requirements](#requirements)); it is not redistributed here for license
->   reasons —
->   [download it free from EnTech Taiwan](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6).
+> - You also need the **PawnIO** driver installed and the signed
+>   `LpcACPIEC.bin` module beside `TPFanControl.exe` (see
+>   [Requirements](#requirements)).
 
 This is a fork of the classic *TPFanControl / TPFanCtrl2* tailored for the
 **ThinkPad P15 Gen2 (dual fan)**, with a number of additional features (see
@@ -59,20 +58,17 @@ below). Code version string: `2.34 P15G2 Dual`.
   full keyboard navigation.
 - Optional **taskbar button** (`ShowInTaskbar=1`) with a temperature badge and
   fan-level progress fill (Alt-Tab / Snap Layouts participation).
-- **Game Mode** — temporarily hides the TVicPort kernel-driver files so
-  anti-cheat (e.g. Riot Vanguard) doesn't flag them; restored automatically on
-  exit/shutdown.
+- **PawnIO-only EC transport** — no TVicPort driver, DLL, or import-library
+  dependency.
 - Optional logging to `TPFanControl.log` and CSV; °C/°F display.
 
 ## Requirements
 
 - Windows 10/11 (x86 / Win32 build).
 - **Administrator privileges** — required to talk to the embedded controller.
-- The **TVicPort** kernel driver (port-I/O access) —
-  **[download: TVicPort (fully-functional freeware)](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6)**
-  from EnTech Taiwan, then run its installer. `TVicPort.lib` is included in this
-  repo so the project builds from a clean clone; the driver itself must be
-  installed on the target machine.
+- The **PawnIO** kernel driver installed on the target machine.
+- The signed `LpcACPIEC.bin` PawnIO module in the same directory as
+  `TPFanControl.exe`.
 - A supported **Lenovo ThinkPad** (EC layout matches; defaults tuned for P15 Gen2).
 
 ## Building
@@ -127,9 +123,19 @@ Highlights:
 - `CriticalTemp` — emergency hibernate if the max temp holds at/above this
   temperature even at full fan speed (same unit rule; 0 = off; recommended 95 °C).
 - `ShowInTaskbar` — 0 tray-only (default), 1 also show a taskbar button.
+- `UseTWR` — legacy compatibility key only; nonzero values are logged and
+  forced off because the stock PawnIO module permits only the standard EC ports.
 - Hotkeys (`Ctrl+Shift+B/S/M/1/2`) for switching modes.
 
 ## Changelog
+
+### Unreleased
+
+- Replaced the TVicPort driver/DLL/import-library path with a PawnIO-only
+  transport using the signed `LpcACPIEC.bin` module.
+- Removed Game Mode and its privileged driver-file rename/recovery code.
+- `UseTWR` now falls back to standard per-register temperature reads because
+  its legacy port window is outside the stock PawnIO module allowlist.
 
 ### v2.34.1
 
@@ -361,6 +367,7 @@ implementations here are independent, but the ideas deserve credit:
 - `SystemTraySDK.cpp/.h` — the `CSystemTray` class by **Chris Maunder**
   ([CodeProject](https://www.codeproject.com/)), © 1999–2003; original
   attribution is preserved in the file header.
-- **TVicPort** (EnTech Taiwan) is *not* covered by this project's license — it
-  has its own terms. Ensure you are licensed to use/redistribute it. Download:
-  [TVicPort (fully-functional freeware)](http://www.entechtaiwan.com/dev/download/ccount/click.php?id=6).
+- The **PawnIO** driver and signed `LpcACPIEC.bin` module are separate
+  third-party prerequisites and retain their own license terms.
+- Legacy `TVicPort.h` / `TVicPort.lib` artifacts are not compiled, linked, or
+  loaded by the current project.

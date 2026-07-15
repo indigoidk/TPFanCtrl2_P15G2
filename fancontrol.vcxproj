@@ -98,9 +98,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <TargetMachine>MachineX86</TargetMachine>
-      <!-- SAFESEH cannot be enabled: TVicPort.lib's import module has no safe-SEH
-           data (LNK2026 "module unsafe for SAFESEH image"). Left off intentionally. -->
-      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -139,7 +137,7 @@
       <ProgramDatabaseFile>.\Debug/fancontrol.pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
-      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -162,6 +160,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="portio_pawn.cpp" />
     <ClCompile Include="SystemTraySDK.cpp" />
     <ClCompile Include="winstuff.cpp" />
     <ClCompile Include="_prec.cpp">
@@ -175,11 +174,11 @@
     <ClInclude Include="approot.h" />
     <ClInclude Include="dynamicicon.h" />
     <ClInclude Include="fancontrol.h" />
+    <ClInclude Include="portio_pawn.h" />
     <ClInclude Include="res\resource.h" />
     <ClInclude Include="SystemTraySDK.h" />
     <ClInclude Include="TaskbarTextIcon.h" />
     <ClInclude Include="tools.h" />
-    <ClInclude Include="TVicPort.h" />
     <ClInclude Include="winstuff.h" />
     <ClInclude Include="_prec.h" />
   </ItemGroup>
@@ -198,9 +197,6 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res\fancontrol.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="TVicPort.lib" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="res\xp-manifest.txt" />

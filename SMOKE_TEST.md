@@ -1,9 +1,10 @@
 # TPFanControl — Manual Smoke-Test Checklist
 
-This app touches kernel drivers (TVicPort), a Windows service, raw embedded-controller
-(EC) port I/O, and renames driver files for Game Mode. Those surfaces are hard to cover
-with unit tests, so run this checklist before tagging a release (or after changing
-anything in `approot.cpp`, `portio.cpp`, `fanstuff.cpp`, or the close/shutdown paths).
+This app talks to the PawnIO kernel driver, runs as a Windows service, and performs
+raw embedded-controller (EC) port I/O. Those surfaces are hard to cover with unit
+tests, so run this checklist before tagging a release (or after changing anything in
+`approot.cpp`, `portio.cpp`, `portio_pawn.cpp`, `fanstuff.cpp`, or the close/shutdown
+paths).
 
 Run on a real ThinkPad (the target is a P15 Gen2). Use an **elevated** prompt — EC
 access and service install require administrator rights. Keep the lid/fan audible so
@@ -107,15 +108,17 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
       *"CRITICAL ... hibernating"* and the machine hibernates; on resume it does
       **not** immediately re-hibernate (re-arms only 5 °C below). Reset to 0/95 after.
 
-## 7. Game Mode (driver hide/restore)
+## 7. PawnIO backend
 
-- ☐ Enable **Game mode (Hide Drivers)**. TaskDialog confirms; `TVicHW64.sys` and
-      `TVicPort64.sys` in `C:\Windows\System32\drivers` become `*.sys.bak`.
-- ☐ Disable Game mode. Both `.sys` files are restored; no `.bak` left behind.
-- ☐ Enable Game mode, then exit the app cleanly → drivers are restored on exit.
-- ☐ Partial-failure rollback (optional, advanced): make the 2nd rename fail (e.g. hold
-      one file open) and confirm the **first rename is rolled back** — you never end up
-      with one `.sys` and one `.sys.bak`.
+- ☐ With PawnIO installed, `LpcACPIEC.bin` beside the exe, and an elevated launch,
+      the app opens promptly and reports sane temperatures/RPMs.
+- ☐ Temporarily move `LpcACPIEC.bin` away and launch interactively → startup retries,
+      then the error names PawnIO, the missing module, and Administrator privileges;
+      no windowless background process remains. Restore the module afterward.
+- ☐ Set `UseTWR=1` → the log reports that TWR is unsupported exactly once, then
+      standard per-register temperature reads continue normally.
+- ☐ `dumpbin /imports Release\TPFanControl.exe` shows no TVicPort import, and
+      `dumpbin /loadconfig` shows a populated Safe Exception Handler Table.
 
 ## 8. Service lifecycle
 
@@ -131,9 +134,9 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
 - ☐ **Stop:** `sc stop TPFanControl`. Stops **promptly** (well under 15 s), state →
       STOPPED. No hang, no lingering process.
 - ☐ **Stop during startup:** stop the service immediately after start, *while* it is
-      still in the 180 s `OpenTVicPort` retry (e.g. temporarily rename the TVic driver so
-      the port won't open). It must still stop promptly (the stop event aborts the retry)
-      and not hang on an INFINITE wait.
+      still in the 180 s PawnIO-open retry (e.g. temporarily move `LpcACPIEC.bin` so
+      the transport won't open). It must still stop promptly (the stop event aborts
+      the retry) and not hang on an INFINITE wait. Restore the module afterward.
 - ☐ **Start failure reporting:** if the worker/event can't be created, `sc start` reports
       a failure (state STOPPED with a specific exit code) rather than a stuck START_PENDING.
 - ☐ **Uninstall:** `TPFanControl.exe -u`. Service removed from `services.msc`.
