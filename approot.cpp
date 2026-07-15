@@ -11,19 +11,31 @@ int APIENTRY WinMain(HINSTANCE instance, HINSTANCE, LPSTR aArgs, int) {
     // against planting: search only System32, never the application directory.
     ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
 
+	// Detect a service launch (-s / -S) up front. A service runs on the invisible
+	// session-0 desktop, where a modal MessageBox would block forever with nobody
+	// to dismiss it - fatal now that SCM auto-restart can relaunch us into a still
+	// single-instance-locked mutex (e.g. a zombie worker from a timed-out stop).
+	// The full arg parse happens below; this is only enough to keep startup quiet.
+	bool serviceLaunch = false;
+	if (aArgs) {
+		for (const char *p = aArgs; *p; ++p)
+			if ((*p == '-' || *p == '/') && (p[1] == 's' || p[1] == 'S'))
+				serviceLaunch = true;
+	}
+
 	HANDLE hLock = CreateMutex(NULL,FALSE,"TPFanControlMutex01");
 
   if (hLock == NULL) {
       DWORD ec = GetLastError();
-      ShowError(ec, "program or service already running");
+      if (!serviceLaunch) ShowError(ec, "program or service already running");
 
       return ec;
   }
 
   if (WAIT_OBJECT_0 != WaitForSingleObject(hLock,0)) {
       DWORD ec = GetLastError();
-      ShowError(ec, "program or service already running");
-	
+      if (!serviceLaunch) ShowError(ec, "program or service already running");
+
       return ec;
   }
 
@@ -112,9 +124,20 @@ DWORD InstallService(bool quiet) {
     char CmdLine[MAX_PATH + 8];
     sprintf_s(CmdLine, sizeof(CmdLine), "\"%s\" -s", ExePath);
 
+    // Depend on the PawnIO driver so the SCM starts it (it is DEMAND_START) BEFORE
+    // our ServiceMain/worker run. Our Open() then finds PawnIO already RUNNING and
+    // never calls StartServiceW itself - eliminating the ROOT of the STOP-vs-
+    // StartServiceW deadlock: a worker StartServiceW blocked behind our own in-flight
+    // STOP control (the SCM globally serializes service controls) would otherwise
+    // wedge the 15s stop-wait into an unwanted restart. The pre-check in
+    // portio_pawn.cpp remains as defense-in-depth for a PawnIO crash in the gap
+    // between the SCM's dependency-start and our Open(). Double-null-terminated
+    // single-entry dependency list.
+    static const char kPawnIoDependency[] = "PawnIO\0";
+
     SC_HANDLE svc = CreateService(SCMgr, g_ServiceName, g_ServiceName, SERVICE_ALL_ACCESS,
         SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
-        CmdLine, NULL, NULL, NULL, NULL, NULL);
+        CmdLine, NULL, NULL, kPawnIoDependency, NULL, NULL);
 
     if (!svc) {
         CloseServiceHandle(SCMgr);
@@ -123,10 +146,49 @@ DWORD InstallService(bool quiet) {
         return ec;
     }
 
+    // Auto-recovery: if the service exits with a failure code (e.g. the PawnIO
+    // transport was permanently lost), have the SCM restart it on an escalating
+    // backoff - 30s, then 2min, then 10min repeated for all later failures (the SCM
+    // repeats the last action once the failure count exceeds cActions). This heals
+    // fast when the transport returns quickly, yet won't hammer the SCM/event log
+    // every ~3.5min if PawnIO is gone for good. The counter resets after a day of
+    // health. Deliberately unbounded (no SC_ACTION_NONE): a hard cap would defeat
+    // recovery after a later PawnIO reinstall/upgrade.
+    SC_ACTION restartActions[3];
+    restartActions[0].Type = SC_ACTION_RESTART; restartActions[0].Delay = 30000;    // 30 s
+    restartActions[1].Type = SC_ACTION_RESTART; restartActions[1].Delay = 120000;   // 2 min
+    restartActions[2].Type = SC_ACTION_RESTART; restartActions[2].Delay = 600000;   // 10 min (repeats)
+    SERVICE_FAILURE_ACTIONS sfa;
+    ZeroMemory(&sfa, sizeof(sfa));
+    sfa.dwResetPeriod = 86400;     // 1 day
+    sfa.cActions = 3;
+    sfa.lpsaActions = restartActions;
+    BOOL faOk = ChangeServiceConfig2(svc, SERVICE_CONFIG_FAILURE_ACTIONS, &sfa);
+    DWORD faErr = faOk ? 0 : GetLastError();   // capture now: the next call clobbers GetLastError
+    // By default failure actions fire only on a hard process crash; also honor them
+    // for our graceful STOPPED-with-non-zero-exit-code failure path (the actual
+    // dead-transport signal). Without this flag the restart never fires.
+    SERVICE_FAILURE_ACTIONS_FLAG sfaFlag;
+    sfaFlag.fFailureActionsOnNonCrashFailures = TRUE;
+    BOOL flagOk = ChangeServiceConfig2(svc, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, &sfaFlag);
+    DWORD flagErr = flagOk ? 0 : GetLastError();
+    DWORD cfgErr = faErr ? faErr : flagErr;   // first failure, if either call failed
+    if (cfgErr && !quiet) {
+        // The base service installed, but transport-loss auto-restart is a core
+        // recovery guarantee - surface its absence rather than degrade silently.
+        ShowError(cfgErr,
+            "Service installed, but the auto-restart recovery policy could not be configured");
+    }
+
     CloseServiceHandle(svc);
     CloseServiceHandle(SCMgr);
 
-    return 0;
+    // Non-zero on a recovery-config failure so `-i` (including -q) does not report
+    // success without the auto-restart guarantee. The base service is left installed
+    // and functional (fan control still works); only the SCM auto-restart policy is
+    // missing. Re-running `-i` will NOT reconfigure it (CreateService then returns
+    // ERROR_SERVICE_EXISTS); uninstall (`-u`) then reinstall (`-i`) to reapply it.
+    return cfgErr;
 }
 
 DWORD UninstallService(bool quiet) {
@@ -194,12 +256,42 @@ void ShowMessage(const char *title, const char *description) {
     MessageBox(NULL, description, title, MB_OK);
 }
 
+// Serialize who owns the terminal service-lifecycle transition. A dead-transport
+// self-exit (WorkerThread) and an operator stop (Handler) can race: without this,
+// both could write SERVICE_STOPPED (a second terminal SetServiceStatus is
+// undefined), and the worker's failure-code STOPPED would queue an SCM restart the
+// Handler's later clean STOPPED cannot cancel - restarting a service the operator
+// asked to stop. The first to claim ownership (atomic CAS, no lock held across the
+// worker wait) issues the single terminal status; the loser does nothing.
+enum { OWNER_NONE = 0, OWNER_WORKER = 1, OWNER_HANDLER = 2 };
+static LONG g_lifecycleOwner = OWNER_NONE;
+static bool ClaimLifecycle(LONG who) {
+    return ::InterlockedCompareExchange(&g_lifecycleOwner, who, OWNER_NONE) == OWNER_NONE;
+}
+static void ReportStopped(DWORD win32ExitCode, DWORD specificExitCode) {
+    g_SvcStatus.dwCurrentState = SERVICE_STOPPED;
+    g_SvcStatus.dwCheckPoint = 0;
+    g_SvcStatus.dwWaitHint = 0;   // terminal state: clear any STOP_PENDING wait hint
+    g_SvcStatus.dwWin32ExitCode = win32ExitCode;
+    g_SvcStatus.dwServiceSpecificExitCode = specificExitCode;
+    ::SetServiceStatus(g_SvcHandle, &g_SvcStatus);
+}
+
 VOID WINAPI ServiceMain(DWORD aArgc, LPTSTR* aArgv) {
     g_SvcHandle = RegisterServiceCtrlHandler(g_ServiceName, Handler);
+    if (!g_SvcHandle)
+        // Without a status handle we can neither report status nor be controlled;
+        // bail before starting the worker (which would otherwise see g_SvcHandle==NULL
+        // and misclassify this session-0 run as interactive desktop mode).
+        return;
 
     g_SvcStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     g_SvcStatus.dwCurrentState = SERVICE_START_PENDING;
-    g_SvcStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+    // Do NOT accept STOP yet: g_stopEvent and the worker thread don't exist until
+    // StartWorkerThread below. Accepting a stop here would let the Handler report a
+    // terminal STOPPED and close the status context while ServiceMain then creates
+    // the worker and reports RUNNING on that closed context.
+    g_SvcStatus.dwControlsAccepted = 0;
     g_SvcStatus.dwWin32ExitCode = NO_ERROR;
     g_SvcStatus.dwServiceSpecificExitCode = NO_ERROR;
     g_SvcStatus.dwCheckPoint = 0;
@@ -209,15 +301,25 @@ VOID WINAPI ServiceMain(DWORD aArgc, LPTSTR* aArgv) {
     if (!StartWorkerThread()) {
         // could not create the stop event or worker thread: report a clean
         // failure to the SCM instead of sitting in a half-started state
-        g_SvcStatus.dwCurrentState = SERVICE_STOPPED;
-        g_SvcStatus.dwWin32ExitCode = ERROR_SERVICE_SPECIFIC_ERROR;
-        g_SvcStatus.dwServiceSpecificExitCode = 1;
-        SetServiceStatus(g_SvcHandle, &g_SvcStatus);
+        if (ClaimLifecycle(OWNER_HANDLER))
+            ReportStopped(ERROR_SERVICE_SPECIFIC_ERROR, 1);
         return;
     }
 
+    // Stop infrastructure now exists; only now advertise STOP and go RUNNING.
     g_SvcStatus.dwCurrentState = SERVICE_RUNNING;
+    g_SvcStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
     SetServiceStatus(g_SvcHandle, &g_SvcStatus);
+
+    // Release the worker only now that RUNNING is published, so a fast-fail worker
+    // can't report a terminal STOPPED before this RUNNING write (which would then
+    // land on a closed status context, or leave the SCM at RUNNING with a dead
+    // worker). On the near-impossible ResumeThread failure we'd be stuck RUNNING
+    // with a suspended worker, so fail out cleanly instead.
+    if (::ResumeThread(g_workerThread) == (DWORD)-1) {
+        if (ClaimLifecycle(OWNER_HANDLER))
+            ReportStopped(ERROR_SERVICE_SPECIFIC_ERROR, 1);
+    }
 
     return;
 }
@@ -225,21 +327,24 @@ VOID WINAPI ServiceMain(DWORD aArgc, LPTSTR* aArgv) {
 VOID WINAPI Handler(DWORD fdwControl) {
     switch(fdwControl) {
     case SERVICE_CONTROL_STOP:
+        // Claim operator-stop ownership first. If the worker already claimed a
+        // self-exit (dead transport), let its terminal STOPPED stand: don't publish
+        // STOP_PENDING (which would regress an already-written STOPPED) or a second
+        // terminal status.
+        if (!ClaimLifecycle(OWNER_HANDLER))
+            break;
+
         g_SvcStatus.dwCurrentState = SERVICE_STOP_PENDING;
+        g_SvcStatus.dwCheckPoint = 1;
+        g_SvcStatus.dwWaitHint = 20000;   // StopWorkerThread waits up to 15s; give the SCM headroom
         SetServiceStatus(g_SvcHandle, &g_SvcStatus);
 
-        if (StopWorkerThread()) {
-            g_SvcStatus.dwWin32ExitCode = NO_ERROR;
-            g_SvcStatus.dwServiceSpecificExitCode = 0;
-        }
-        else {
+        if (StopWorkerThread())
+            ReportStopped(NO_ERROR, 0);
+        else
             // worker did not stop: report a stop failure rather than claim a
             // clean STOPPED while it is still running EC/UI code
-            g_SvcStatus.dwWin32ExitCode = ERROR_SERVICE_SPECIFIC_ERROR;
-            g_SvcStatus.dwServiceSpecificExitCode = 2;
-        }
-        g_SvcStatus.dwCurrentState = SERVICE_STOPPED;
-        SetServiceStatus(g_SvcHandle, &g_SvcStatus);
+            ReportStopped(ERROR_SERVICE_SPECIFIC_ERROR, 2);
 
         break;
 
@@ -263,7 +368,10 @@ bool StartWorkerThread() {
             return false;
         }
     }
-    g_workerThread = (HANDLE)_beginthreadex(NULL, 0, WorkerThreadTramp, NULL, 0, NULL);
+    // Create SUSPENDED: the worker must not run (and possibly fast-fail all the way
+    // to its terminal STOPPED report) before ServiceMain has published RUNNING.
+    // ServiceMain resumes it right after that report. See ServiceMain / BLOCKING-1.
+    g_workerThread = (HANDLE)_beginthreadex(NULL, 0, WorkerThreadTramp, NULL, CREATE_SUSPENDED, NULL);
     if (!g_workerThread) {
         debug("StartWorkerThread: _beginthreadex failed\r\n");
         ::CloseHandle(g_stopEvent);
@@ -339,6 +447,7 @@ void WorkerThread(void *dummy) {
 	}
 
     bool ok = false;
+	bool dialogCreated = false;
 	g_PortIo = CreatePawnIoTransport();
 
 	if (g_PortIo) {
@@ -360,6 +469,16 @@ void WorkerThread(void *dummy) {
 		FANCONTROL fc(hInstApp);
 
         g_dialogWnd = fc.GetDialogWnd();
+		dialogCreated = (g_dialogWnd != NULL);
+
+		// If an SCM stop arrived during FANCONTROL construction - before g_dialogWnd
+		// was published - StopWorkerThread's one-shot 5020 post went to a NULL window
+		// and was lost. Re-post it now so we unwind promptly instead of running until
+		// the SCM's 15s stop-wait times out, which reports a stop failure that (with
+		// the new failure actions) would restart a service the operator asked to stop.
+		if (g_stopEvent && ::WaitForSingleObject(g_stopEvent, 0) == WAIT_OBJECT_0
+			&& g_dialogWnd && ::IsWindow(g_dialogWnd))
+			::PostMessage(g_dialogWnd, WM_COMMAND, 5020, 0);
 
 		fc.ProcessDialog();
 
@@ -402,11 +521,20 @@ void WorkerThread(void *dummy) {
 	// dead worker — e.g. the EC port never opened — doesn't leave the service stuck
 	// in RUNNING.
 	bool stopRequested = g_stopEvent && ::WaitForSingleObject(g_stopEvent, 0) == WAIT_OBJECT_0;
-	if (g_SvcHandle && !stopRequested) {
-		g_SvcStatus.dwCurrentState = SERVICE_STOPPED;
-		g_SvcStatus.dwWin32ExitCode = ok ? NO_ERROR : ERROR_SERVICE_SPECIFIC_ERROR;
-		g_SvcStatus.dwServiceSpecificExitCode = ok ? 0 : 3;
-		::SetServiceStatus(g_SvcHandle, &g_SvcStatus);
+	if (g_SvcHandle && !stopRequested && ClaimLifecycle(OWNER_WORKER)) {
+		// A self-exit with the PawnIO transport permanently lost is a FAILURE:
+		// report a non-zero exit code so the SCM's restart action fires and we come
+		// back on a fresh transport. A normal exit (transport alive) stays clean.
+		// Ownership was just claimed, so the Handler won't also write a terminal
+		// status (and a normal SCM stop set stopRequested, skipping this entirely).
+		bool transportLost = (g_PortIo && g_PortIo->TransportLost());
+		// A window that never came up (dialogCreated false - e.g. a session-0
+		// desktop-heap exhaustion) is an abnormal exit, not a clean stop: report a
+		// failure so the SCM restart heals the (usually transient) condition instead
+		// of the service silently vanishing.
+		bool clean = ok && dialogCreated && !transportLost;
+		ReportStopped(clean ? NO_ERROR : ERROR_SERVICE_SPECIFIC_ERROR,
+			clean ? 0 : (transportLost ? 4 : 3));
 	}
 }
 

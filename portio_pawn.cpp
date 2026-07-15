@@ -14,6 +14,13 @@
 #include <new>
 #include <stddef.h>
 
+// Defined in approot.h (compiled into approot.cpp): signalled on service stop. The
+// PawnIO transport peeks it to abort a driver StartServiceW that a pending stop
+// would otherwise wedge (see the StartServiceW pre-check below). Declared at file
+// scope so the reference has EXTERNAL linkage - a block-scope extern inside the
+// anonymous namespace below binds to a non-existent internal symbol (C7631).
+extern HANDLE g_stopEvent;
+
 namespace {
 
 static const WCHAR kPawnIoDevice[] = L"\\\\?\\GLOBALROOT\\Device\\PawnIO";
@@ -154,6 +161,19 @@ StartPawnIoService() {
 			if (::GetTickCount64() >= deadline) {
 				PawnIoLog("PortIoPawn: timed out waiting for the PawnIO service.\r\n");
 				finalError = ERROR_TIMEOUT;
+				break;
+			}
+
+			// A service stop already in flight must abort BEFORE StartServiceW:
+			// starting a driver service can block ~30s and the SCM serializes it
+			// behind our own in-flight STOP control, which would wedge the worker
+			// past StopWorkerThread's 15s wait and provoke an unwanted restart. If the
+			// stop is already signaled, skip the driver start and let the worker
+			// unwind. (Layering compromise: the transport peeks the app's stop event.
+			// The residual sub-ms window between this check and StartServiceW acquiring
+			// the SCM lock is self-healing via the SCM restart.)
+			if (::g_stopEvent && ::WaitForSingleObject(::g_stopEvent, 0) == WAIT_OBJECT_0) {
+				finalError = ERROR_SERVICE_NOT_ACTIVE;
 				break;
 			}
 

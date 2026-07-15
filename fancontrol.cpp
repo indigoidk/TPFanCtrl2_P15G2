@@ -16,6 +16,7 @@
 // --------------------------------------------------------------
 #include "_prec.h"
 #include "fancontrol.h"
+#include "portio_pawn.h"   // g_PortIo->TransportLost() for the service dead-transport exit
 #include "tools.h"
 #include "taskbartexticon.h"
 #include "sysinfoapi.h"
@@ -456,8 +457,21 @@ FANCONTROL::FANCONTROL(HINSTANCE hinstapp)
 
 	// sleep until start time + delay time
 	if ((GetTickCount64() / 1000) <= (ULONGLONG)SecWinUptime) {
-		while ((tickCount + (ULONGLONG)SecStartDelay * 1000) >= GetTickCount64())
-			Sleep(200);
+		// A service must be able to abort this (possibly long, up to a configured
+		// SecStartDelay) startup delay when the SCM asks it to stop. g_dialogWnd is
+		// not published until construction returns, so StopWorkerThread's 5020 post
+		// can't reach us here; without this, the stop runs to its 15s timeout and
+		// (with failure actions) triggers an unwanted restart. Desktop mode has no
+		// stop event and just sleeps.
+		extern HANDLE g_stopEvent;
+		while ((tickCount + (ULONGLONG)SecStartDelay * 1000) >= GetTickCount64()) {
+			if (g_stopEvent) {
+				if (::WaitForSingleObject(g_stopEvent, 200) == WAIT_OBJECT_0)
+					break;
+			}
+			else
+				Sleep(200);
+		}
 	}
 
 	// taskbaricon (keep code after reading config)
@@ -3389,8 +3403,11 @@ FANCONTROL::DlgProc(HWND
 
 					// don't close if we can't set the fan back to bios controlled
 					if (!this->ActiveMode || this->SetFan("On close", FAN_CTRL_BIOS, true)) {
-						// remember where the window was for next launch
-						this->SaveWindowPos("TPFanControl.ini");
+						// remember where the window was for next launch (never from a
+						// session-0 service: its hidden window would overwrite the real
+						// desktop placement in the shared ini with junk coordinates)
+						if (!this->Runs_as_service)
+							this->SaveWindowPos("TPFanControl.ini");
 						::KillTimer(this->hwndDialog, m_fanTimer);
 						::KillTimer(this->hwndDialog, m_titleTimer);
 						::KillTimer(this->hwndDialog, m_iconTimer);
@@ -3674,7 +3691,21 @@ FANCONTROL::DlgProc(HWND
 				if (ok) {
 					this->Trace("Set to BIOS Mode, to many consecutive read errors");
 					::Sleep(2000);
-					::SendMessage(this->hwndDialog, WM_ENDSESSION, 0, 0);
+					if (this->Runs_as_service) {
+						// WM_ENDSESSION is a no-op for a service, so only a genuinely
+						// dead PawnIO transport exits here: unwind ProcessDialog via the
+						// close command so the worker exits and the service reports
+						// STOPPED with a failure code (see WorkerThread), letting the SCM
+						// restart us on a fresh transport instead of polling a dead one
+						// forever. On a LIVE-but-flaky EC (reads failing while the BIOS
+						// write verified) we stay resident in BIOS mode and self-recover
+						// when reads resume - exiting there would report a CLEAN stop, so
+						// the SCM would NOT restart and the service would silently vanish.
+						if (g_PortIo && g_PortIo->TransportLost())
+							::PostMessage(this->hwndDialog, WM_COMMAND, 5020, 0);
+					}
+					else
+						::SendMessage(this->hwndDialog, WM_ENDSESSION, 0, 0);
 				}
 			}
 		}

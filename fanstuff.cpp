@@ -595,9 +595,12 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 	// thermal backstop stays the authority. Report success anyway so the
 	// read-error-recovery and clean-exit paths (which all gate on SetFan(BIOS)
 	// succeeding) stop retrying a write that can never land, and the app exits
-	// cleanly - a fresh process re-opens a healthy transport. NOTE: this un-gates
-	// the DESKTOP exit (via WM_ENDSESSION); a service on a permanently-dead
-	// transport still relies on SCM/manual restart (see known-issues). (dead-transport)
+	// cleanly - a fresh process re-opens a healthy transport. This un-gates the
+	// DESKTOP exit (via WM_ENDSESSION) and, in service mode, the MaxReadErrors
+	// handler routes the same lost-transport case through the 5020 close command so
+	// the worker exits and the service reports a failure code; InstallService
+	// configures SCM auto-restart so a fresh process comes back on a healthy
+	// transport. (dead-transport)
 	if (g_PortIo && g_PortIo->TransportLost()) {
 		this->Trace("SetFan: PawnIO transport lost - abandoning EC control and exiting; firmware retains thermal backstop");
 		if (final)

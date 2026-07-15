@@ -836,10 +836,17 @@ FANCONTROL::ReadConfig(const char* configfile)
 		(DLGPROC)BaseDlgProc,
 		(LPARAM)this);
 	if (!this->hwndDialog) {
-		char emsg[128];
-		sprintf_s(emsg, sizeof(emsg),
-			"Could not create the main window (error %lu).", ::GetLastError());
-		::MessageBoxA(NULL, emsg, "TPFanControl", MB_OK | MB_ICONERROR);
+		// A service runs on the invisible session-0 desktop, where a modal box would
+		// block forever with nobody to dismiss it - and SCM auto-restart would then
+		// wedge on every restart. Only pop it in interactive mode. (Runs_as_service
+		// is not assigned until below, so test g_SvcHandle, which it derives from.)
+		extern SERVICE_STATUS_HANDLE g_SvcHandle;
+		if (g_SvcHandle == NULL) {
+			char emsg[128];
+			sprintf_s(emsg, sizeof(emsg),
+				"Could not create the main window (error %lu).", ::GetLastError());
+			::MessageBoxA(NULL, emsg, "TPFanControl", MB_OK | MB_ICONERROR);
+		}
 	}
 
 	// Running as a service exactly when the SCM control handler has been
