@@ -1,0 +1,40 @@
+TPFanControl (P15 Gen2 Dual) - Third-Party Notices
+====================================================
+
+TPFanControl's own source code is released into the public domain (see the
+per-file headers / the repository LICENSE). The components below are separate
+works under their own licenses and are NOT covered by that dedication.
+
+----------------------------------------------------------------------
+1. LpcACPIEC.bin  (bundled, shipped next to the executable)
+----------------------------------------------------------------------
+  What:      Signed PawnIO module that TPFanControl loads to reach the
+             embedded controller (EC) through the PawnIO kernel driver.
+  Upstream:  https://github.com/namazso/PawnIO.Modules  (file: LpcACPIEC.p)
+             from release 0.2.9.
+  Copyright: (C) namazso <admin@namazso.eu> and contributors.
+  License:   GNU Lesser General Public License, version 2.1 or later
+             (SPDX: LGPL-2.1-or-later). The full license text is available at
+             https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt and must
+             accompany this binary in any distribution.
+  Integrity: The binary is shipped UNMODIFIED from the upstream signed release.
+             SHA-256: C38FD116E7AFF4D1FDB0A494E296BE0A6708E5A22FC72F14587442FB7F8F7906
+             (The PawnIO driver verifies the module's embedded signature at load
+             time; do not patch this file.)
+  Notes:     This is a separate, dynamically-loaded data artifact - not linked
+             into or a derivative of TPFanControl. Corresponding source for the
+             module is the LpcACPIEC.p file at the upstream URL above.
+
+----------------------------------------------------------------------
+2. PawnIO kernel driver  (system prerequisite - NOT shipped by this app)
+----------------------------------------------------------------------
+  The PawnIO driver (https://pawnio.eu / https://github.com/namazso/PawnIO) is a
+  Microsoft-signed, separately-installed system component. TPFanControl requires
+  it to be installed and running but does not distribute it. It is GPL-2.0.
+
+----------------------------------------------------------------------
+3. Embedded / adopted source components (in-tree)
+----------------------------------------------------------------------
+  - CSystemTray (SystemTraySDK.cpp/.h): Chris Maunder, CodeProject - see the
+    file header for its (permissive CodeProject) license.
+  See the individual source-file headers for any other adopted snippets.

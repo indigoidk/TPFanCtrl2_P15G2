@@ -100,6 +100,10 @@
       <TargetMachine>MachineX86</TargetMachine>
       <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)LpcACPIEC.bin" "$(OutDir)"</Command>
+      <Message>Deploying signed PawnIO module LpcACPIEC.bin next to the exe</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Midl>
@@ -139,6 +143,10 @@
       <TargetMachine>MachineX86</TargetMachine>
       <ImageHasSafeExceptionHandlers>true</ImageHasSafeExceptionHandlers>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)LpcACPIEC.bin" "$(OutDir)"</Command>
+      <Message>Deploying signed PawnIO module LpcACPIEC.bin next to the exe</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="approot.cpp" />
