@@ -17,6 +17,7 @@
 
 #include "_prec.h"
 #include "fancontrol.h"
+#include "portio_pawn.h"   // g_PortIo->TransportLost() for the dead-transport exit
 #include "tools.h"
 #include <powrprof.h>   // SetSuspendState (emergency hibernate)
 #pragma comment(lib, "powrprof.lib")
@@ -586,6 +587,24 @@ FANCONTROL::ActivateSmartProfile(int profile) {
 //-------------------------------------------------------------------------
 int
 FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
+	// The PawnIO transport is permanently lost (a fatal ioctl + a failed bounded
+	// reopen latched it): the EC can no longer be read, written, or reopened. We
+	// cannot actually write BIOS mode here - the last fan level (or a partial
+	// dual-fan update) persists in the EC - so this is NOT a real hand-off but an
+	// abandonment of unreachable software control; the firmware's own hardware
+	// thermal backstop stays the authority. Report success anyway so the
+	// read-error-recovery and clean-exit paths (which all gate on SetFan(BIOS)
+	// succeeding) stop retrying a write that can never land, and the app exits
+	// cleanly - a fresh process re-opens a healthy transport. NOTE: this un-gates
+	// the DESKTOP exit (via WM_ENDSESSION); a service on a permanently-dead
+	// transport still relies on SCM/manual restart (see known-issues). (dead-transport)
+	if (g_PortIo && g_PortIo->TransportLost()) {
+		this->Trace("SetFan: PawnIO transport lost - abandoning EC control and exiting; firmware retains thermal backstop");
+		if (final)
+			this->FinalSeen = true;   // no further fan changes are possible; mirror the success path
+		return TRUE;
+	}
+
 	int ok = 0;
 	int fan1_ok = 0;
 	int fan2_ok = 0;
