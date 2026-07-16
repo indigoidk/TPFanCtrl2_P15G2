@@ -71,6 +71,18 @@ WaitForFlags(USHORT port, char flags, int onoff = false, int timeout = 1000) {
 //-------------------------------------------------------------------------
 // read a byte from the embedded controller (EC) via port io
 //-------------------------------------------------------------------------
+// A single EC byte read is retried up to this many times, with this gap between
+// attempts, to ride out transient acpi.sys / ACPI contention on the shared 0x62/0x66
+// ports (see ReadByteFromEC). kEcStageWaitMs caps the #1-#3 handshake stages (the
+// WaitForFlags default is 1000ms): under the retry loop an un-capped stuck flag would
+// otherwise burn 3x1000ms and, multiplied by ReadEcStatus's 10x sample retry, stall a
+// wedged-EC poll for tens of seconds while holding EcAccess. The cap makes a wedged
+// read fail fast into the retry / BIOS-fallback path (wedge worst-case is now shorter
+// than the pre-retry single-shot design).
+static const int   kEcReadAttempts = 3;
+static const DWORD kEcRetryGapMs   = 15;
+static const int   kEcStageWaitMs  = 100;
+
 bool
 FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 
@@ -83,61 +95,113 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 		this->Trace("Using ACPI_EC_TYPE2");
 	}
 
-	// wait for IBF and OBF to clear
-	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF | ACPI_EC_FLAG_OBF)) {
-		this->Trace("readec: timed out #1");
-		return false;
-	}
-
-	// indicate read operation desired
-	if (!g_PortIo->WritePort8((USHORT)this->EC_CTRL, ACPI_EC_COMMAND_READ)) {
-		this->Trace("readec: write READ command failed");
-		return false;
-	}
-
-	// wait for IBF to clear (command byte removed from EC's input queue)
-	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {
-		this->Trace("readec: timed out #2");
-		return false;
-	}
-
-	// indicate read operation desired location
-	if (!g_PortIo->WritePort8((USHORT)this->EC_DATA, (unsigned char)offset)) {
-		this->Trace("readec: write address failed");
-		return false;
-	}
-
-	// wait for IBF to clear (address byte removed from EC's input queue)
-	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF)) {
-		this->Trace("readec: timed out #3");
-		return false;
-	}
-
-	// wait for OBF=TRUE: the result byte must actually be in the EC's output
-	// buffer before we read it, otherwise we latch a stale/previous value and
-	// can drive a wrong fan decision. Short timeout (100ms) so a misbehaving EC
-	// fails fast into the caller's retry / BIOS-fallback path instead of hanging;
-	// a healthy EC has OBF set already and returns immediately.
-	if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_OBF, true, 100)) {
-		this->Trace("readec: timed out #4 (OBF)");
-		// Drain any late/stale output byte so it cannot be mis-consumed as the NEXT
-		// transaction's result (H-01). Reading the data port clears OBF; the value
-		// is discarded because this read has already failed.
-		unsigned char status;
-		if (g_PortIo->ReadPort8((USHORT)this->EC_CTRL, &status) && (status & ACPI_EC_FLAG_OBF)) {
-			unsigned char discard;
-			(void)g_PortIo->ReadPort8((USHORT)this->EC_DATA, &discard);
+	// The 0x62/0x66 EC ports are shared with acpi.sys (and other ACPI consumers),
+	// which frequently win the port mid-handshake so our byte's OBF never arrives in
+	// the short #4 window. Re-issue the whole handshake a few times, with a brief gap
+	// for the contending consumer to finish, before giving up - this stops one unlucky
+	// byte among the many read per sample from failing the whole sample and, in bursts,
+	// tripping the consecutive-read-error BIOS fallback.
+	//
+	// PROVENANCE: raw port I/O has no transaction ownership, so an individual byte
+	// cannot be *proven* to belong to our request (true of the original single-shot
+	// design too). NOTE: ReadEcStatus's double-sample match validates ONLY the FanCtrl
+	// field, NOT the temperature bytes (SampleMatch, fanstuff.cpp; recorded in
+	// PAWNIO_BACKEND_DESIGN.md) - so a rare torn/foreign temperature can reach a fan
+	// decision. This is pre-existing; the retry marginally widens it (the drain lets a
+	// torn sample complete where an un-drained stale OBF would have failed the next
+	// byte's #1). It is bounded end-to-end by: the plausibility filter (0x00/0x80/>=128
+	// rejected) + max-over-12 aggregation (a wrong-low on a non-hottest sensor can't move
+	// MaxTemp) + smart hysteresis + the FailsafeTemp fail-safe on raw safetyMax + one-poll
+	// blast radius + the firmware's ~99C throttle (a wrong-low cannot push temp past
+	// ~100C). Wrong-high fails safe (fan up). The per-attempt drain also clears a stale
+	// byte before each fresh handshake so it can't be re-consumed. FOLLOW-UP: extend
+	// SampleMatch to compare temps within a drift tolerance to close the gap. A fatal
+	// transport failure aborts at once; genuine flag timeouts (incl. a not-yet-latched
+	// TransportLost) retry.
+	int lastStage = 0;
+	for (int attempt = 0; attempt < kEcReadAttempts; ++attempt) {
+		if (attempt > 0) {
+			::Sleep(kEcRetryGapMs);
+			// Drain any byte left in OBF by the previous attempt (our own late
+			// response, or a foreign one) BEFORE re-issuing: otherwise #1's
+			// wait-for-OBF-clear spins its whole timeout (nothing else here reads the
+			// data port to clear it), and a stale byte could be re-consumed. The fresh
+			// handshake below then produces this attempt's own response.
+			unsigned char stale;
+			if (g_PortIo->ReadPort8((USHORT)this->EC_CTRL, &stale) && (stale & ACPI_EC_FLAG_OBF))
+				(void)g_PortIo->ReadPort8((USHORT)this->EC_DATA, &stale);
 		}
-		return false;
+
+		// wait for IBF and OBF to clear (capped: a stuck flag must fail fast into the
+		// retry, not spin the full default timeout)
+		if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF | ACPI_EC_FLAG_OBF, false, kEcStageWaitMs)) {
+			if (g_PortIo->TransportLost()) return false;   // fatal transport loss: don't retry
+			lastStage = 1;
+			continue;
+		}
+
+		// indicate read operation desired
+		if (!g_PortIo->WritePort8((USHORT)this->EC_CTRL, ACPI_EC_COMMAND_READ)) {
+			this->Trace("readec: write READ command failed");
+			return false;   // transport failure - retrying cannot help
+		}
+
+		// wait for IBF to clear (command byte removed from EC's input queue)
+		if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF, false, kEcStageWaitMs)) {
+			if (g_PortIo->TransportLost()) return false;
+			lastStage = 2;
+			continue;
+		}
+
+		// indicate read operation desired location
+		if (!g_PortIo->WritePort8((USHORT)this->EC_DATA, (unsigned char)offset)) {
+			this->Trace("readec: write address failed");
+			return false;   // transport failure
+		}
+
+		// wait for IBF to clear (address byte removed from EC's input queue)
+		if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_IBF, false, kEcStageWaitMs)) {
+			if (g_PortIo->TransportLost()) return false;
+			lastStage = 3;
+			continue;
+		}
+
+		// wait for OBF=TRUE: the result byte must actually be in the EC's output
+		// buffer before we read it, otherwise we latch a stale/previous value and
+		// can drive a wrong fan decision. Short per-attempt timeout so a contended
+		// read fails fast into the retry above (or, after the last attempt, the
+		// caller's BIOS-fallback path) instead of hanging; a healthy EC has OBF set
+		// already and returns immediately.
+		if (!WaitForFlags(this->EC_CTRL, ACPI_EC_FLAG_OBF, true, kEcStageWaitMs)) {
+			// Drain any byte that lands right at the timeout so it cannot be
+			// mis-consumed as the next attempt's (or transaction's) result (H-01).
+			unsigned char status;
+			if (g_PortIo->ReadPort8((USHORT)this->EC_CTRL, &status) && (status & ACPI_EC_FLAG_OBF)) {
+				unsigned char discard;
+				(void)g_PortIo->ReadPort8((USHORT)this->EC_DATA, &discard);
+			}
+			if (g_PortIo->TransportLost()) return false;
+			lastStage = 4;
+			continue;   // OBF never arrived (contention) - re-issue the handshake
+		}
+
+		if (!g_PortIo->ReadPort8((USHORT)this->EC_DATA, pdata)) {
+			this->Trace("readec: data read failed");
+			return false;   // transport failure
+		}
+
+		this->m_ecTypeKnown = true;   // a read has completed on this pair
+		return TRUE;
 	}
 
-	if (!g_PortIo->ReadPort8((USHORT)this->EC_DATA, pdata)) {
-		this->Trace("readec: data read failed");
-		return false;
-	}
-
-	this->m_ecTypeKnown = true;   // a read has completed on this pair
-	return TRUE;
+	// Every attempt hit a flag timeout at the recorded stage: another ACPI consumer is
+	// holding the EC ports. Same failure the single-shot path reported, so the caller's
+	// read-error accounting / BIOS fallback is unchanged.
+	char tb[80];
+	sprintf_s(tb, sizeof(tb), "readec: EC busy - timed out at stage #%d after %d attempts",
+		lastStage, kEcReadAttempts);
+	this->Trace(tb);
+	return false;
 }
 
 //-------------------------------------------------------------------------

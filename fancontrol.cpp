@@ -985,10 +985,13 @@ FANCONTROL::~FANCONTROL() {
 	if (this->hThread) {
 		// close the handle only after a confirmed clean exit; on timeout we leak
 		// the handle rather than risk closing one still in use by a live thread.
-		// 8000ms (not 2000): a worst-case ReadEcStatus can run ~3.6s on the default
-		// path, so the old 2s wait could return while the worker was still touching
-		// `this` / doing port I/O after teardown began - use the same budget as the
-		// close path (THREAD_WAIT_TIMEOUT_MS) to join cleanly in the common case (C-03).
+		// 8000ms (not 2000): a worst-case ReadEcStatus under EC contention now runs
+		// ~5-7s (the capped read-stage retry ladder; a pathological wedge or the
+		// pre-existing un-capped write path can exceed this, in which case the handle
+		// is leaked - acceptable here). The old 2s wait could return while the worker
+		// was still touching `this` / doing port I/O after teardown began - use the
+		// same budget as the close path (THREAD_WAIT_TIMEOUT_MS) to join cleanly in
+		// the common case (C-03).
 		if (::WaitForSingleObject(this->hThread, 8000) == WAIT_OBJECT_0)
 			::CloseHandle(this->hThread);
 		this->hThread = NULL;
