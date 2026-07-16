@@ -199,7 +199,8 @@ BEGIN
     CONTROL         "Always on top",9302,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,108,90,10
     CONTROL         "Show in taskbar",9328,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,110,108,105,10
     LTEXT           "Notifications && logging",9342,7,122,200,9
-    CONTROL         "Disable balloon notifications",9307,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,133,200,10
+    CONTROL         "Disable balloon notifications",9307,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,133,120,10
+    CONTROL         "Mute fan beeps",9329,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,138,133,77,10
     CONTROL         "Write TPFanControl.log",9308,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,14,146,95,10
     CONTROL         "Write CSV log",9309,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,113,146,95,10
     LTEXT           "Poll interval (seconds):",IDC_STATIC,14,161,80,8

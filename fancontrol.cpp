@@ -3830,6 +3830,7 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		::CheckDlgButton(hwnd, 9306, self->DarkMode       ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9327, self->DarkModeSetting == 2 ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9307, self->NoBallons      ? BST_CHECKED : BST_UNCHECKED);
+		::CheckDlgButton(hwnd, 9329, self->MuteBeep       ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9308, self->Log2File       ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9309, self->Log2csv        ? BST_CHECKED : BST_UNCHECKED);
 		::CheckDlgButton(hwnd, 9314, self->ShowGraph      ? BST_CHECKED : BST_UNCHECKED);
@@ -3890,6 +3891,9 @@ FANCONTROL::SettingsDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				"badge and fan-level progress, in addition to the tray icon.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9307,
 				"Suppress the tray balloon pop-ups (mode changes, warnings).");
+			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9329,
+				"Silence the short beep on every fan-speed change. The critical "
+				"over-temperature alarm still sounds.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9308,
 				"Append readings to TPFanControl.log in the program folder.");
 			tip = AddDialogTip(hwnd, tip, self->hinstapp, 9309,
@@ -4060,6 +4064,7 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 		this->DarkMode = followSys ? QuerySystemDark() : (wantDark ? 1 : 0);
 	}
 	this->NoBallons      = (::IsDlgButtonChecked(hwnd, 9307) == BST_CHECKED);
+	this->MuteBeep       = (::IsDlgButtonChecked(hwnd, 9329) == BST_CHECKED);
 	this->Log2File       = (::IsDlgButtonChecked(hwnd, 9308) == BST_CHECKED);
 	this->Log2csv        = (::IsDlgButtonChecked(hwnd, 9309) == BST_CHECKED);
 	this->ShowGraph      = (::IsDlgButtonChecked(hwnd, 9314) == BST_CHECKED);

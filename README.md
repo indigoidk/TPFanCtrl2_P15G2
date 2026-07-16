@@ -124,6 +124,8 @@ Highlights:
   polls), pin the fan to maximum (mode-independent) and raise a warning (same unit
   rule; 0 = off).
 - `ShowInTaskbar` — 0 tray-only (default), 1 also show a taskbar button.
+- `MuteBeep` — 1 silences the short beep on every fan-speed change (the critical
+  over-temperature alarm still sounds); also a "Mute fan beeps" checkbox in Settings.
 - `UseTWR` — legacy compatibility key only; nonzero values are logged and
   forced off because the stock PawnIO module permits only the standard EC ports.
 - Hotkeys (`Ctrl+Shift+B/S/M/1/2`) for switching modes.
@@ -157,6 +159,9 @@ Highlights:
   cools, with the firmware throttle / hard thermal trip as the backstop. Also fixes
   a pre-existing tray-SDK bug (`m_bWin2K`) that had silently disabled every
   text-icon balloon, and warns if sticky Manual is configured with no fail-safe.
+- **Mute fan beeps:** a new `MuteBeep` setting (checkbox in Settings →
+  Notifications & logging) silences the short beep emitted on every fan-speed
+  change; the critical over-temperature alarm is deliberately left audible.
 
 ### v2.34.1
 

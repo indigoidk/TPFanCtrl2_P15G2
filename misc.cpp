@@ -59,6 +59,7 @@ FANCONTROL::SaveConfig(const char* configfile)
 		{ "ShowLog",        this->ShowLog },
 		{ "DarkMode",       this->DarkModeSetting },   // 0/1/2 (2 = follow system)
 		{ "NoBallons",      this->NoBallons },
+		{ "MuteBeep",       this->MuteBeep },
 		{ "Log2File",       this->Log2File },
 		{ "Log2csv",        this->Log2csv },
 		{ "Cycle",          this->Cycle },
@@ -483,6 +484,11 @@ FANCONTROL::ReadConfig(const char* configfile)
 
 			if (_strnicmp(buf, "NoBallons=", 10) == 0) {
 				this->NoBallons = atoi(buf + 10);
+				continue;
+			}
+
+			if (_strnicmp(buf, "MuteBeep=", 9) == 0) {
+				this->MuteBeep = atoi(buf + 9);
 				continue;
 			}
 

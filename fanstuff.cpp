@@ -629,7 +629,7 @@ FANCONTROL::SetFan(const char* source, int fanctrl, bool final) {
 	int fan2_ok = 0;
 	char obuf[256] = "", obuf2[256], datebuf[128];
 
-	if (this->FanBeepFreq && this->FanBeepDura)
+	if (!this->MuteBeep && this->FanBeepFreq && this->FanBeepDura)
 		::Beep(this->FanBeepFreq, this->FanBeepDura);
 
 	this->CurrentDateTimeLocalized(datebuf, sizeof(datebuf));

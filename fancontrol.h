@@ -140,6 +140,7 @@ protected:
 	int MaxReadErrors;
 	int SecWinUptime;
 	int SlimDialog;
+	int MuteBeep = 0;   // 1 = mute the per-fan-change beep (FanBeep); the critical alarm still sounds
 	int NoBallons,
 		HK_BIOS_Method,
 		HK_Manual_Method,
