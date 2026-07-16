@@ -3146,7 +3146,12 @@ FANCONTROL::DlgProc(HWND
 			break;
 
 		case 2: // update window title
-			if (this->CurrentMode == 3 && this->MaxTemp > this->ManModeExitInternal) {
+			// ManModeExit=0 (ManModeExitInternal==0) disables this Manual->Smart auto-exit
+			// so Manual is sticky. The >0 guard is REQUIRED: without it, internal 0 makes
+			// the test MaxTemp>0 and Manual would exit every poll. Sticky Manual is safe
+			// only while a fail-safe is armed - LoadConfig warns if it is not.
+			if (this->CurrentMode == 3 && this->ManModeExitInternal > 0 &&
+					this->MaxTemp > this->ManModeExitInternal) {
 				this->ModeToDialog(2);
 				::PostMessage(this->hwndDialog, WM__GETDATA, 0, 0);
 			}
@@ -4099,7 +4104,16 @@ FANCONTROL::ApplySettingsFromDialog(HWND hwnd)
 			if (fs < 0)   fs = 0;
 			if (fs > 120) fs = 120;
 			this->FailsafeTemp = fs;
-			if (fs == 0) this->m_failsafeTripped = false;   // disabling clears any trip
+			if (fs == 0) {
+				this->m_failsafeTripped = false;   // disabling clears any trip
+				// Live-apply mirror of the ReadConfig coupling warning: disabling the
+				// fail-safe while Manual auto-exit is off (ManModeExit=0) leaves sticky
+				// Manual with no software thermal protection below CriticalTemp.
+				if (this->ManModeExitInternal <= 0)
+					this->Trace("WARNING: fail-safe disabled via Settings while Manual "
+						"auto-exit is off (ManModeExit=0) - Manual has NO software thermal "
+						"protection below CriticalTemp; only the firmware throttle guards it.");
+			}
 		}
 	}
 

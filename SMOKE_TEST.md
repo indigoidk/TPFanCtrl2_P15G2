@@ -103,10 +103,10 @@ Legend: ☐ = to verify. Note the build under test: `Release\TPFanControl.exe` (
       cooling ~3 °C below releases it.
 - ☐ **Stall watchdog** (passive): grep the log for *"Fan stall"* — should appear
       **only** if the EC genuinely dropped a command; none expected in normal runs.
-- ☐ **Emergency hibernate** (optional, careful): set `CriticalTemp=70` (just above
-      a loaded temp), stress briefly → after 3 polls at/above it the log records
-      *"CRITICAL ... hibernating"* and the machine hibernates; on resume it does
-      **not** immediately re-hibernate (re-arms only 5 °C below). Reset to 0/95 after.
+- ☐ **Critical-temp guard** (optional): set `CriticalTemp` just above a loaded temp,
+      stress briefly → after 3 polls at/above it the log records *"CRITICAL ... forcing
+      max fan and warning"*, the fan pins to max, and a tray warning appears; it does
+      **not** re-warn until it cools 5 °C below. Reset to 0/100 after.
 
 ## 7. PawnIO backend
 

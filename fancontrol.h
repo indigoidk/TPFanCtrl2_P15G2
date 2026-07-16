@@ -169,9 +169,9 @@ protected:
 	int ManModeExitInternal;
 	int FailsafeTemp = 0;          // thermal fail-safe threshold in Celsius (0 = off)
 	bool m_failsafeTripped = false;   // true while the fail-safe is holding the fan at max
-	// emergency hibernate (the line of defense BEHIND the fail-safe): if max
-	// temp holds at/above CriticalTemp for 3 polls, hibernate before the
-	// firmware's hard thermal trip cuts power. 0 = off (opt-in).
+	// critical-temp guard (the escalation BEHIND the fail-safe): if max temp holds
+	// at/above CriticalTemp for 3 polls, pin the fan to max (mode-independent) and
+	// warn the user; the firmware throttle / hard trip is the backstop. 0 = off (opt-in).
 	int CriticalTemp = 0;
 	int m_critPolls = 0;           // consecutive polls at/above CriticalTemp
 	bool m_critFired = false;      // fired; re-arms after cooling 5 C below

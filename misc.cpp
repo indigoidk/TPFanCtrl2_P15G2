@@ -621,7 +621,7 @@ FANCONTROL::ReadConfig(const char* configfile)
 				continue;
 			}
 
-			// emergency hibernate threshold (display unit; F->C convert + range-check
+			// critical-temp threshold (display unit; F->C convert + range-check
 			// happen in the post-parse block once Fahrenheit mode is known)
 			if (_strnicmp(buf, "CriticalTemp=", 13) == 0) {
 				this->CriticalTemp = atoi(buf + 13);
@@ -813,9 +813,9 @@ FANCONTROL::ReadConfig(const char* configfile)
 				"# 2 = keep the current mode (still re-asserts the level after resume)\r\n"
 				"SuspendMode=1\r\n"
 				"\r\n"
-				"# Emergency hibernate: if the max temperature holds at/above this\r\n"
-				"# (deg C, 70-110) even at full fan speed, hibernate before the firmware\r\n"
-				"# thermal trip cuts power. 0 = disabled. Recommended: 95.\r\n"
+				"# Critical temp: if the max temperature holds at/above this (deg C,\r\n"
+				"# 70-110) for 3 polls even at full fan speed, pin the fan to maximum and\r\n"
+				"# warn. 0 = disabled (opt-in). Set a few deg below your CPU thermal trip.\r\n"
 				"CriticalTemp=0\r\n",
 				fnew);
 			fclose(fnew);
@@ -1051,6 +1051,17 @@ FANCONTROL::ReadConfig(const char* configfile)
 	// CriticalTemp: only a sane Celsius window arms it; anything else = off (preserves
 	// the original parse-time semantics, now applied after conversion).
 	this->CriticalTemp = (this->CriticalTemp >= 70 && this->CriticalTemp <= 110) ? this->CriticalTemp : 0;
+
+	// Safety coupling: sticky Manual (ManModeExit=0) removes the only temperature-driven
+	// escape from a too-low manual fan level. That is safe ONLY while a fail-safe is armed
+	// to force full fan on overheat. With both off, Manual has no software thermal
+	// protection below any CriticalTemp threshold (the critical guard, if set, still pins
+	// max fan at its threshold); the firmware throttle is the backstop. Warn on it.
+	if (this->ManModeExitInternal <= 0 && this->FailsafeTemp <= 0) {
+		this->Trace("WARNING: Manual auto-exit disabled (ManModeExit=0) AND fail-safe off "
+			"(FailsafeTemp=0) - Manual has no software thermal protection below CriticalTemp; "
+			"the firmware throttle is the backstop. Set FailsafeTemp to re-arm the fail-safe.");
+	}
 
 	this->Trace("");
 

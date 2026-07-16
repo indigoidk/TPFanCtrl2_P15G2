@@ -19,27 +19,6 @@
 #include "fancontrol.h"
 #include "portio_pawn.h"   // g_PortIo->TransportLost() for the dead-transport exit
 #include "tools.h"
-#include <powrprof.h>   // SetSuspendState (emergency hibernate)
-#pragma comment(lib, "powrprof.lib")
-
-//-------------------------------------------------------------------------
-//  enable SeShutdownPrivilege (held but disabled, even for an admin token)
-//  and hibernate. SetSuspendState returns on resume; on failure the machine
-//  simply keeps running with the fan already forced to max.
-//-------------------------------------------------------------------------
-static void EmergencyHibernate() {
-	HANDLE hTok = NULL;
-	if (::OpenProcessToken(::GetCurrentProcess(),
-			TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hTok)) {
-		TOKEN_PRIVILEGES tp = {};
-		tp.PrivilegeCount = 1;
-		tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-		if (::LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tp.Privileges[0].Luid))
-			::AdjustTokenPrivileges(hTok, FALSE, &tp, 0, NULL, NULL);
-		::CloseHandle(hTok);
-	}
-	::SetSuspendState(TRUE /*hibernate*/, TRUE, FALSE);
-}
 #include "fanlogic.h"   // pure decision logic (unit-tested in tests/fanlogic_tests.cpp)
 
 #define TP_ECOFFSET_FAN         (char)0x2F    // 1 byte (binary xyzz zzz)
@@ -391,8 +370,9 @@ FANCONTROL::HandleData(void) {
 	// to max every poll, doubling EC writes and log spam during an overheat.
 	if (this->FailsafeTemp > 0 && this->ActiveMode &&
 		(this->CurrentMode == 2 || this->CurrentMode == 3)) {
-		// (critical-temp hibernate guard sits after this block - it is the
-		// escalation path for when full fan speed is not enough)
+		// (the critical-temp guard sits after this block - the escalation path
+		// (pin max fan mode-independently + warn) for when the fail-safe's full
+		// fan is not holding the temperature)
 		// log both flag transitions explicitly: SetFan only logs when it has to
 		// write, so a trip with the fan already at max would otherwise leave no
 		// record in the trace - exactly the event worth a timestamp after a
@@ -425,16 +405,17 @@ FANCONTROL::HandleData(void) {
 		this->m_failsafeWriteWarned = false;
 	}
 
-	// Emergency hibernate (last line of defense; upstream ask #95): if max
-	// temp holds at/above CriticalTemp for 3 consecutive polls - i.e. even
-	// the fail-safe's full fan speed is losing - force max fan one final
-	// time and hibernate before the firmware's hard thermal trip cuts power.
-	// Mode-independent: critical heat is critical in BIOS mode too. Re-arms
-	// only after cooling 5 C below the threshold so a resume into a
-	// still-hot machine cannot loop straight back into hibernation.
-	// safetyMax (raw) + safetyValid guards: a poll with no trusted sensor can neither
-	// re-arm nor escalate, and any non-hot/invalid poll resets the streak - so garbage
-	// telemetry can never accumulate three "critical" polls into a spurious hibernate.
+	// Critical-temp guard (upstream ask #95, revised): if max temp holds at/above
+	// CriticalTemp for 3 consecutive polls - i.e. even the fail-safe's full fan speed is
+	// losing - pin the fan to absolute max and warn the user (non-blocking tray balloon).
+	// Deliberately NO BIOS handoff and NO hibernate (see the fire block below): the fan is
+	// already maxed, so the only useful escalation left is to alert the human and let the
+	// firmware's own ~99 C throttle / hard thermal trip act as the automatic backstop.
+	// Mode-independent: critical heat is critical in BIOS mode too. Re-arms only after
+	// cooling 5 C below the threshold so a still-hot machine cannot loop straight back into
+	// the warning. safetyMax (raw) + safetyValid guards: a poll with no trusted sensor can
+	// neither re-arm nor escalate, and any non-hot/invalid poll resets the streak - so
+	// garbage telemetry can never accumulate three "critical" polls into a spurious alarm.
 	if (this->CriticalTemp > 0) {
 		if (this->m_critFired) {
 			if (safetyValid && safetyMax <= this->CriticalTemp - 5) {
@@ -448,30 +429,61 @@ FANCONTROL::HandleData(void) {
 				this->m_critPolls = 0;
 				char cbuf[160];
 				sprintf_s(cbuf, sizeof(cbuf),
-					"CRITICAL: max temp %d C at/above %d C for 3 polls - forcing max fan and hibernating",
+					"CRITICAL: max temp %d C at/above %d C for 3 polls - forcing max fan and warning",
 					safetyMax, this->CriticalTemp);
 				this->Trace(cbuf);
-				this->SetFan("Critical", FAN_CTRL_FULL);
-				::MessageBeep(MB_ICONERROR);
-				EmergencyHibernate();   // returns on resume (or on failure)
+				this->SetFan("Critical", FAN_CTRL_FULL);   // immediate; the forceFullFan
+				::MessageBeep(MB_ICONERROR);                // override below keeps 0x40 pinned
+				// NO hibernate and NO BIOS handoff. The thermal override (forceFullFan, driven
+				// by m_critFired) pins the fan to absolute max 0x40 in EVERY mode below,
+				// including BIOS - handing to firmware (0x80) would only spin it DOWN. The CPU's
+				// own throttle + hard thermal shutdown are the automatic backstop. Warn the
+				// human non-blocking via whichever tray icon is live: symbol-icon mode uses
+				// pTaskbarIcon, text-icon mode (this machine, ShowTempIcon=1) uses ppTbTextIcon.
+				if (!this->NoBallons) {
+					char wbuf[200];
+					sprintf_s(wbuf, sizeof(wbuf),
+						"Max temp %d C reached the critical threshold (%d C). "
+						"Fan forced to maximum - reduce load.",
+						safetyMax, this->CriticalTemp);
+					if (this->pTaskbarIcon) {
+						this->pTaskbarIcon->SetBalloon(NIIF_ERROR,
+							"TPFanControl - CRITICAL temperature", wbuf, 15);
+					}
+					else if (this->ppTbTextIcon && this->ppTbTextIcon[0] &&
+							this->pTextIconMutex->Lock(100)) {
+						this->ppTbTextIcon[0]->DiShowballon(wbuf,
+							"TPFanControl - CRITICAL temperature", NIIF_ERROR, 15);
+						this->pTextIconMutex->Unlock();
+					}
+				}
 			}
 		}
 		else
 			this->m_critPolls = 0;
 	}
 
+	// A thermal latch forces full fan and suppresses every per-mode write below, so the
+	// critical "pin to max" is a real mode-independent hold (incl. BIOS), not a one-shot
+	// that the same poll's mode write clobbers. m_failsafeTripped is Smart/Manual-only;
+	// m_critFired (critical, 3-poll debounce) is mode-independent. Event-driven BIOS handoffs
+	// OUTSIDE this poll (sleep/lid/read-error) may still write 0x80 for one poll, but the
+	// override at the bottom re-pins 0x40 on the next successful poll - and each is itself a
+	// safe fallback (sleep cools; a blind read-error correctly defers to firmware).
+	bool forceFullFan = this->m_failsafeTripped || this->m_critFired;
+
 	switch (this->CurrentMode) {
 
 	case 1: // BIOS
 		this->TraceModeChange();
 
-		if (this->State.FanCtrl != FAN_CTRL_BIOS)
+		if (!forceFullFan && this->State.FanCtrl != FAN_CTRL_BIOS)
 			ok = this->SetFan("BIOS", FAN_CTRL_BIOS);
 		break;
 
 	case 2: // Smart
 		// anyValid: never run the curve on a no-sensor poll (would drive to fan 0 - C-04)
-		if (anyValid && !this->m_failsafeTripped)   // fail-safe holds the fan; skip curve control
+		if (anyValid && !forceFullFan)   // a thermal latch (fail-safe/critical) holds the fan; skip curve
 			this->SmartControl();       // (logs its own mode-change transition)
 		else
 			this->TraceModeChange();    // logs only an actual mode change arriving while the fail-safe holds
@@ -492,7 +504,7 @@ FANCONTROL::HandleData(void) {
 		             ((lvl >= 0 && lvl <= 7) || lvl == 64);
 		// anyValid: on a no-sensor poll hold the current level rather than re-issuing
 		// (harmless for a fixed level, but keeps "no telemetry -> no fan change" - C-04)
-		if (anyValid && !this->m_failsafeTripped && valid) {
+		if (anyValid && !forceFullFan && valid) {
 			if (this->State.FanCtrl != lvl)
 				ok = this->SetFan("Manual", lvl);
 			else
@@ -510,9 +522,13 @@ FANCONTROL::HandleData(void) {
 
 	this->PreviousMode = this->CurrentMode;
 
-	// apply the fail-safe override (full speed) once per cycle while tripped
-	if (this->m_failsafeTripped && this->State.FanCtrl != FAN_CTRL_FULL) {
-		ok = this->SetFan("Fail-safe: max temp reached, forcing full fan speed", FAN_CTRL_FULL);
+	// apply the thermal override (full speed) once per cycle while a latch holds - the
+	// fail-safe (Smart/Manual) OR the critical latch (mode-independent, so it pins 0x40 even
+	// in BIOS mode where the fail-safe never trips). This is the real "pin to max".
+	if (forceFullFan && this->State.FanCtrl != FAN_CTRL_FULL) {
+		ok = this->SetFan(this->m_critFired
+			? "Critical: forcing full fan speed"
+			: "Fail-safe: max temp reached, forcing full fan speed", FAN_CTRL_FULL);
 		// one-shot note (SetFan logs FAILED!! per attempt): if this EC does not
 		// echo 0x40 back, the override re-fires every poll until the trip clears
 		if (!ok && !this->m_failsafeWriteWarned) {

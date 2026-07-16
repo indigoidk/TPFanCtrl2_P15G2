@@ -123,9 +123,12 @@ void CSystemTray::Initialise() {
 	m_bV4 = FALSE;
 
 #ifdef SYSTEMTRAY_USEW2K
-	OSVERSIONINFOEX os = { sizeof(os) };
-	VerifyVersionInfoA(&os, VER_MAJORVERSION, 1);
-	m_bWin2K = (VER_PLATFORM_WIN32_NT == os.dwPlatformId && os.dwMajorVersion >= 5);
+	// Balloon tooltips need Windows 2000+, which every supported OS satisfies. The old
+	// VerifyVersionInfoA(&os, ...) did NOT populate `os` (it compares AGAINST os, it does
+	// not fill it like GetVersionEx), so dwPlatformId/dwMajorVersion stayed 0, m_bWin2K was
+	// always FALSE, and ShowBalloon silently returned early - disabling every text-icon
+	// balloon, including the critical-temp warning. Win2K+ is a given now, so assert it.
+	m_bWin2K = TRUE;
 #else
 	m_bWin2K = FALSE;
 #endif

@@ -38,8 +38,8 @@ below). Code version string: `2.34 P15G2 Dual`.
 - **Manual mode** with a fan-speed slider (0–7, 64 = max, 128 = hand back to BIOS).
 - **Layered safety guards**: thermal fail-safe (forces full fan speed above
   `FailsafeTemp`), a fan-stall watchdog (re-issues the level if the EC silently
-  drops a command), an optional **emergency hibernate** at `CriticalTemp`, and
-  automatic BIOS fallback after repeated EC read errors.
+  drops a command), an optional **critical-temp guard** at `CriticalTemp` (pins
+  max fan + warns), and automatic BIOS fallback after repeated EC read errors.
 - **Sleep-aware**: hands the fan to the BIOS across suspend *and* Modern
   Standby (S0), defers EC access ~10 s after wake, then restores your mode and
   re-asserts the fan level (`SuspendMode`).
@@ -120,8 +120,9 @@ Highlights:
   after resume (default), 2 keep the mode (still re-asserts after resume).
 - `FailsafeTemp` — force full fan speed at/above this temperature (display unit:
   °C, or °F if your curve is in Fahrenheit; 0 = off).
-- `CriticalTemp` — emergency hibernate if the max temp holds at/above this
-  temperature even at full fan speed (same unit rule; 0 = off; recommended 95 °C).
+- `CriticalTemp` — if the max temp holds at/above this even at full fan speed (3
+  polls), pin the fan to maximum (mode-independent) and raise a warning (same unit
+  rule; 0 = off).
 - `ShowInTaskbar` — 0 tray-only (default), 1 also show a taskbar button.
 - `UseTWR` — legacy compatibility key only; nonzero values are logged and
   forced off because the stock PawnIO module permits only the standard EC ports.
@@ -148,6 +149,14 @@ Highlights:
 - **Torn-temperature guard:** `ReadEcStatus`'s two-sample match now also requires
   the temperature sensors to agree (within 5 °C), so a torn/foreign reading from
   port contention is re-read rather than driving a fan decision.
+- **Sticky Manual + critical-temp guard:** `ManModeExit=0` disables the
+  Manual→Smart auto-exit so Manual stays put through the board's normal high-temp
+  zone. The `CriticalTemp` action is now a mode-independent **max-fan pin + tray
+  warning** (replacing the old emergency hibernate): held at the threshold for 3
+  polls, the fan is forced to `0x40` in every mode and re-pinned each poll until it
+  cools, with the firmware throttle / hard thermal trip as the backstop. Also fixes
+  a pre-existing tray-SDK bug (`m_bWin2K`) that had silently disabled every
+  text-icon balloon, and warns if sticky Manual is configured with no fail-safe.
 
 ### v2.34.1
 
@@ -175,9 +184,10 @@ degrades gracefully on Windows 10).
 - **Fan-stall watchdog**: if the EC register commands a spinning level but both
   tachometers read ~0 for 3 polls, the level is re-issued and logged (catches
   silently dropped EC writes).
-- **Emergency hibernate** (`CriticalTemp`, opt-in): if the max temperature
-  holds at/above the threshold even at full fan speed, the machine hibernates
-  before the firmware's hard thermal trip cuts power.
+- **Critical-temp guard** (`CriticalTemp`, opt-in): if the max temperature holds
+  at/above the threshold for 3 polls even at full fan speed, the fan is pinned to
+  maximum (mode-independent) and a warning is raised; the firmware throttle / hard
+  thermal trip is the backstop.
 - Fixed: first run without a `TPFanControl.ini` used to start windowless and
   tray-less; an uninitialized power-notification handle could reach the OS on
   early-exit paths.
@@ -371,7 +381,7 @@ implementations here are independent, but the ideas deserve credit:
   without an ini starting windowless) were spotted in
   [BeteixZ's fork](https://github.com/BeteixZ/TPFanCtrl2)
   ([commit 10e3ab4](https://github.com/BeteixZ/TPFanCtrl2/commit/10e3ab4b54e8c20ea59fe5db711ab5fe19440403)).
-- The **emergency-hibernate guard** implements upstream feature request
+- The **critical-temp guard** implements upstream feature request
   [Shuzhengz/TPFanCtrl2#95](https://github.com/Shuzhengz/TPFanCtrl2/issues/95).
 
 ### Embedded third-party code
