@@ -136,6 +136,18 @@ Highlights:
 - Removed Game Mode and its privileged driver-file rename/recovery code.
 - `UseTWR` now falls back to standard per-register temperature reads because
   its legacy port window is outside the stock PawnIO module allowlist.
+- **Service auto-restart:** a Windows service on a permanently-dead PawnIO
+  transport now exits cleanly and the SCM restarts it (escalating backoff) onto
+  a fresh transport; a live-but-flaky EC stays resident. Adds a PawnIO service
+  dependency, START_PENDING/RUNNING staging, and a lifecycle-ownership guard so a
+  self-exit and an operator stop can't race the terminal status.
+- **EC-read contention resilience:** each embedded-controller byte read re-issues
+  its handshake up to 3× (stale-OBF drain, capped stage waits) to ride out
+  acpi.sys sharing the `0x66/0x62` ports — ~70× fewer read failures measured on a
+  P15 Gen2, without stalling on a wedged EC.
+- **Torn-temperature guard:** `ReadEcStatus`'s two-sample match now also requires
+  the temperature sensors to agree (within 5 °C), so a torn/foreign reading from
+  port contention is re-read rather than driving a fan decision.
 
 ### v2.34.1
 
