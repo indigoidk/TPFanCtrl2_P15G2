@@ -104,20 +104,18 @@ FANCONTROL::ReadByteFromEC(int offset, unsigned char* pdata) {
 	//
 	// PROVENANCE: raw port I/O has no transaction ownership, so an individual byte
 	// cannot be *proven* to belong to our request (true of the original single-shot
-	// design too). NOTE: ReadEcStatus's double-sample match validates ONLY the FanCtrl
-	// field, NOT the temperature bytes (SampleMatch, fanstuff.cpp; recorded in
-	// PAWNIO_BACKEND_DESIGN.md) - so a rare torn/foreign temperature can reach a fan
-	// decision. This is pre-existing; the retry marginally widens it (the drain lets a
-	// torn sample complete where an un-drained stale OBF would have failed the next
-	// byte's #1). It is bounded end-to-end by: the plausibility filter (0x00/0x80/>=128
-	// rejected) + max-over-12 aggregation (a wrong-low on a non-hottest sensor can't move
-	// MaxTemp) + smart hysteresis + the FailsafeTemp fail-safe on raw safetyMax + one-poll
-	// blast radius + the firmware's ~99C throttle (a wrong-low cannot push temp past
-	// ~100C). Wrong-high fails safe (fan up). The per-attempt drain also clears a stale
-	// byte before each fresh handshake so it can't be re-consumed. FOLLOW-UP: extend
-	// SampleMatch to compare temps within a drift tolerance to close the gap. A fatal
-	// transport failure aborts at once; genuine flag timeouts (incl. a not-yet-latched
-	// TransportLost) retry.
+	// design too). The end-to-end guard against a wrong byte reaching a fan decision is
+	// ReadEcStatus's double-sample match (SampleMatch, fanstuff.cpp): the FanCtrl field
+	// AND all 12 temperature sensors (agree within 5C) must match between two back-to-back
+	// samples, retried up to 10x, so a torn/foreign temperature breaks the match and is
+	// re-read. The per-attempt drain also clears a stale byte before each fresh handshake
+	// so it can't be re-consumed. RESIDUAL (accepted): a torn value within 5C of truth, or
+	// the same wrong value torn into BOTH samples (correlated contention, ~p^2) - bounded
+	// by max-over-12 aggregation (a wrong-low on a non-hottest sensor can't move MaxTemp) +
+	// smart hysteresis + the FailsafeTemp fail-safe on raw safetyMax (when configured) +
+	// one-poll blast radius + the firmware's ~99C throttle. Wrong-high fails safe (fan up).
+	// A fatal transport failure aborts at once; genuine flag timeouts (incl. a not-yet-
+	// latched TransportLost) retry.
 	int lastStage = 0;
 	for (int attempt = 0; attempt < kEcReadAttempts; ++attempt) {
 		if (attempt > 0) {

@@ -780,18 +780,50 @@ FANCONTROL::SetHdw(const char* source, int hdwctrl, int HdwOffset, int AnyWayBit
 //-------------------------------------------------------------------------
 //  check two EC status samples for accpetable equivalence
 //-------------------------------------------------------------------------
+// Max delta (Celsius) allowed between the two back-to-back status samples for a temp
+// sensor to be considered "agreeing". The samples are one ReadEcRaw apart (ms to a few
+// hundred ms). A hard load transition CAN step an EC temp register by more than this in a
+// single gap - that costs exactly ONE of ReadEcStatus's 10 retries (the next pair reads
+// post-step values that agree), never a fan-decision error. A torn/foreign byte from
+// EC-port contention is almost always a wildly different register value, so it is
+// reliably rejected. 5C is the compromise: loose enough a genuine transient costs at most
+// a retry, tight enough that a torn value hiding a hot sensor by >5C is caught. Sustained
+// >5C-per-gap mismatch across all 10 tries would need a physically impossible ~50-100C
+// sustained slew, so this cannot drive the MaxReadErrors BIOS fallback.
+static const int kSampleTempToleranceC = 5;
+
 bool
 FANCONTROL::SampleMatch(FCSTATE* smp1, FCSTATE* smp2) {
-	
+
 	// match for identical fanctrl settings
 	if (smp1->FanCtrl != smp2->FanCtrl) return false;
 
-	// insert any further match criteria here:
-	// -----------------------
-	//
-	// if (......) ......
-	//
-	// -----------------------
+	// Require the temperature sensors to agree within a small tolerance. ReadEcStatus
+	// reads its two samples back-to-back, so a real temperature has barely moved, while a
+	// torn/foreign byte from EC-port contention (acpi.sys winning the shared 0x62/0x66
+	// ports) usually deviates far more. Requiring agreement makes a wrong temperature
+	// break the match, so the pair is rejected and re-read - closing the gap this function
+	// previously left: it compared ONLY FanCtrl, so a torn temp in sample2 (which
+	// ReadEcStatus publishes) could reach a fan decision. A slot is skipped ONLY when BOTH
+	// samples report it empty/invalid (no real value either way); a valid-vs-invalid
+	// disagreement is itself a torn read and is rejected below (else a hot sensor torn to
+	// an invalid byte, e.g. 95 -> 0x80, would pass and be dropped downstream, hiding the
+	// hottest reading for a poll). Fan RPMs are not compared (they legitimately fluctuate).
+	// RESIDUAL: a torn value within 5C of truth, or the same wrong value torn into BOTH
+	// samples (correlated contention, ~p^2), still passes - backstopped by max-over-12
+	// aggregation, one-poll blast radius, the FailsafeTemp fail-safe on raw safetyMax (when
+	// configured), and the firmware ~99C throttle.
+	for (int i = 0; i < 12; i++) {
+		int a = smp1->Sensors[i], b = smp2->Sensors[i];
+		bool aInvalid = (a == 0x00 || a == 0x80 || a >= 128);
+		bool bInvalid = (b == 0x00 || b == 0x80 || b >= 128);
+		if (aInvalid && bInvalid) continue;   // both empty/invalid: nothing real to compare
+		// exactly one invalid == the samples disagree on the slot's presence (a torn read);
+		// fall through so the large delta rejects the pair rather than silently skipping it.
+		int d = a - b;
+		if (d < 0) d = -d;
+		if (d > kSampleTempToleranceC) return false;
+	}
 
 	return TRUE;
 }
