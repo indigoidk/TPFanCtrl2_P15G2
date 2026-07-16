@@ -27,6 +27,10 @@ This dedication applies to the TPFanControl source code in this repository only.
 It does NOT apply to bundled third-party components, which retain their own
 licenses:
 
-  * TVicPort (TVicPort.lib / TVicPort.h) — EnTech Taiwan. Port-I/O driver
-    library, subject to its own license terms. You must be appropriately
-    licensed to use and/or redistribute it.
+  * Bundled: the signed PawnIO module `LpcACPIEC.bin`. System prerequisite (not
+    shipped): the PawnIO kernel driver. Adopted in-tree: CSystemTray
+    (SystemTraySDK.cpp/.h). See THIRD-PARTY-NOTICES.txt for full attribution and
+    license terms.
+  * This PawnIO-only fork no longer bundles or depends on the TVicPort port-I/O
+    library (TVicPort.lib / TVicPort.h, EnTech Taiwan) that earlier TPFanControl
+    builds used.

@@ -71,6 +71,29 @@ below). Code version string: `2.34 P15G2 Dual`.
   `TPFanControl.exe`.
 - A supported **Lenovo ThinkPad** (EC layout matches; defaults tuned for P15 Gen2).
 
+## Installation
+
+TPFanControl reaches the embedded controller through the **PawnIO** kernel driver
+and loads the signed `LpcACPIEC.bin` module into it at startup — so PawnIO must be
+present first. No TVicPort or other `.sys` port driver is used or installed.
+
+1. **Install PawnIO** (one time) from <https://pawnio.eu>
+   (source: <https://github.com/namazso/PawnIO>) and follow its installer — it is a
+   Microsoft-signed system driver.
+2. **Get TPFanControl** — download the packaged zip from the **Releases** page (it
+   ships `TPFanControl.exe` and `LpcACPIEC.bin` together), or build it (see
+   *Building* below).
+3. **Keep `LpcACPIEC.bin` beside `TPFanControl.exe`.** The build copies it there
+   automatically; if you relocate the exe, move the `.bin` with it — TPFanControl
+   loads it from its own folder and will not start without it.
+4. **Run `TPFanControl.exe` as Administrator** (EC access needs elevation). On
+   first launch it opens the PawnIO device and loads the module; if PawnIO is not
+   installed or the module is missing/mismatched, it reports the error and exits
+   instead of touching the hardware.
+5. *(Optional)* For hands-off startup, run it elevated at logon via Task Scheduler,
+   or install it as a service — it declares a PawnIO dependency and restarts itself
+   onto a fresh transport if the EC link dies.
+
 ## Building
 
 Open `fancontrol.sln` in Visual Studio (2019/2022) and build **Release | Win32**,
