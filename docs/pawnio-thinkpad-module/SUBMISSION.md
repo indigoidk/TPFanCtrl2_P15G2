@@ -72,7 +72,11 @@ This matters because tp_smapi warns that releasing the lock after writing TWR15 
 the EC starts its reply can hang some firmware
 ([reference](https://github.com/linux-thinkpad/tp_smapi/blob/master/thinkpad_ec.c#L123-L181)).
 The TYPE1 0x1600/0x1604 wait/command/data handshake likewise stays in user mode, as it does
-for the stock 0x62/0x66 interface.
+for the stock 0x62/0x66 interface. Two caveats worth stating: the `Access_EC` mutant is purely
+**advisory** (acpi.sys and firmware AML ignore it, so it cannot prevent a concurrent
+firmware/ACPI EC access mid-transaction); and a full TWR transaction holds it across poll
+loops for up to ~1 s, starving other EC monitors — which further motivates the single-IOCTL
+future design proposed above.
 
 ## Security rationale and residual risk
 
@@ -93,6 +97,15 @@ prove the machine is a supported ThinkPad, enforce TWR order/completion, coordin
 firmware/drivers that ignore `Access_EC`, or recover a transaction if the caller exits
 mid-sequence. The module signature establishes that PawnIO trusts the code and capability;
 it does not make every invocation harmless.
+
+**Capability hierarchy (stated plainly).** The any-byte writes to the EC command/data pairs
+— 0x62/0x66 and the TYPE1 0x1600/0x1604 — are the module's **dominant** capability: via the
+ACPI-EC command protocol they reach **any** EC register (fan control at 0x2F, fan select at
+0x31, and on some machines battery/charge/power behavior), the same capability class as stock
+`LpcACPIEC`. The carefully-restricted TWR write values are **secondary** hardening, not the
+main protection — they do not shrink the EC-pair grant. A reviewer should weigh this module
+primarily on the EC-pair writes, **especially the TYPE1 pair** (see open question 9), not the
+TWR value lock.
 
 A stronger future design would expose a single high-level `ioctl_thinkpad_twr_read_20`
 operation performing the complete request, status checks, timeouts, and response read inside
@@ -186,6 +199,17 @@ hardware models/BIOS/EC revisions TODO.
 8. Before submission, byte-compare the base against release 0.2.9 (`git show 0.2.9:LpcACPIEC.p`);
    this draft was checked against current upstream `main`, and the tagged 0.2.9 `LpcACPIEC.p`
    was not independently byte-compared in this environment.
+9. **Do the TYPE1 EC-pair WRITES (arbitrary bytes to 0x1600/0x1604) belong in this module?**
+   The stated `UseTWR` motivation needs only read-0x1604 (the TWR status poll) plus the
+   restricted TWR row; the legacy TYPE1 *register-access* path that writes 0x1600/0x1604 is
+   **not** used by the current PawnIO fork (it forces `UseTWR=0` and uses 0x62/0x66), and
+   tp_smapi treats 0x1604 (STR3) as read-only. Arbitrary writes to 0x1604 — the H8S command
+   port in the legacy protocol — are a strictly larger capability than everything the TWR
+   value restriction protects. Decide either: **(a)** narrow the module to a pure TWR enabler
+   (drop 0x1600 entirely, make 0x1604 read-only), or **(b)** keep TYPE1 register access for
+   TYPE1-EC ThinkPads and defend it explicitly, adding a *positive* test asserting that
+   arbitrary 0x1600/0x1604 writes are intended. As drafted this module takes **(b)**
+   implicitly — a maintainer should make it a conscious choice.
 
 ---
 *Drafted by Codex (gpt-5.6-sol, ultra) with web research against upstream PawnIO sources, at

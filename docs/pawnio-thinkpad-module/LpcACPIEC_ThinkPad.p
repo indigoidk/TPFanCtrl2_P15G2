@@ -34,7 +34,9 @@
 //
 // Legacy ThinkPad TYPE1 EC:
 //   0x1600 = data
-//   0x1604 = command/status (H8S STR3 for TWR transactions)
+//   0x1604 = TYPE1 EC command/status; also the H8S STR3 status the TWR path polls
+//            (read-only there). NOTE: arbitrary WRITES to the TYPE1 pair are this
+//            module's dominant capability - see SUBMISSION.md open question 9.
 is_ec_pair_port(port) {
     return port == 0x0062 ||
            port == 0x0066 ||
