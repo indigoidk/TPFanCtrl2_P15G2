@@ -98,6 +98,31 @@ inline int smart_decide(int maxTemp, int curFan, bool lev64Norm, int prevMode,
 	return newfanctrl;
 }
 
+// Decide whether the temperature sensors of two back-to-back EC status samples "agree"
+// closely enough to trust the pair as one coherent snapshot. Each of the n slots:
+//   - is SKIPPED only when BOTH samples report it empty/invalid (raw 0x00, 0x80, or
+//     >= 128 - the EC's absent/implausible set the plausibility filter also drops): there
+//     is no real value either way;
+//   - a valid-vs-invalid disagreement is itself a torn read and FAILS (else a hot sensor
+//     torn to an invalid byte, e.g. 95 -> 0x80, would pass and be silently dropped
+//     downstream, hiding the hottest reading for a poll);
+//   - two valid values must be within tolC degrees.
+// Returns true iff every compared slot agrees. RPMs are deliberately not passed (they
+// legitimately fluctuate). FANCONTROL::SampleMatch requires the fan-control byte to match
+// too, then calls this; the split lets this exact logic be unit-tested off-hardware.
+inline bool sensors_agree(const unsigned char* a, const unsigned char* b, int n, int tolC) {
+	for (int i = 0; i < n; i++) {
+		int x = a[i], y = b[i];
+		bool xInvalid = (x == 0x00 || x == 0x80 || x >= 128);
+		bool yInvalid = (y == 0x00 || y == 0x80 || y >= 128);
+		if (xInvalid && yInvalid) continue;   // both empty/invalid: nothing real to compare
+		int d = x - y;
+		if (d < 0) d = -d;
+		if (d > tolC) return false;
+	}
+	return true;
+}
+
 } // namespace fanlogic
 
 #endif // FANLOGIC_H

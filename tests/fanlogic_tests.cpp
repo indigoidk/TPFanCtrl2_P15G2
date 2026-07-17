@@ -153,10 +153,36 @@ static void test_smart_edges() {
 	}
 }
 
+// ---- sensors_agree -----------------------------------------------------------
+
+static void test_sensors_agree() {
+	const int TOL = 5;
+	// all-valid, all within tolerance -> agree
+	{ unsigned char a[4] = {50,60,70,45}, b[4] = {52,61,68,45}; CHECK(sensors_agree(a,b,4,TOL) == true); }
+	// tolerance edge: delta 5 passes, delta 6 fails
+	{ unsigned char a[1] = {70}, b[1] = {75}; CHECK(sensors_agree(a,b,1,TOL) == true); }
+	{ unsigned char a[1] = {70}, b[1] = {76}; CHECK(sensors_agree(a,b,1,TOL) == false); }
+	// torn-low hiding a hot sensor: 95 vs 40 -> reject
+	{ unsigned char a[1] = {95}, b[1] = {40}; CHECK(sensors_agree(a,b,1,TOL) == false); }
+	// both-invalid slot is skipped (0x00 / 0x80 / >=128) -> agree
+	{ unsigned char a[1] = {0x00}, b[1] = {0x80}; CHECK(sensors_agree(a,b,1,TOL) == true); }
+	{ unsigned char a[1] = {0xFF}, b[1] = {0x00}; CHECK(sensors_agree(a,b,1,TOL) == true); }
+	// valid-vs-invalid disagreement is a torn read -> reject (both directions)
+	{ unsigned char a[1] = {95},   b[1] = {0x80}; CHECK(sensors_agree(a,b,1,TOL) == false); }
+	{ unsigned char a[1] = {0x00}, b[1] = {90};   CHECK(sensors_agree(a,b,1,TOL) == false); }
+	// mixed: a both-invalid slot skipped, the rest agree -> agree
+	{ unsigned char a[3] = {60, 0x00, 70}, b[3] = {62, 0x80, 71}; CHECK(sensors_agree(a,b,3,TOL) == true); }
+	// mixed: one slot tears -> whole pair rejected
+	{ unsigned char a[3] = {60, 70, 80}, b[3] = {61, 70, 40}; CHECK(sensors_agree(a,b,3,TOL) == false); }
+	// n == 0 -> vacuously agrees
+	{ unsigned char a[1] = {99}, b[1] = {1}; CHECK(sensors_agree(a,b,0,TOL) == true); }
+}
+
 int main() {
 	test_biased_temp();
 	test_smart();
 	test_smart_edges();
+	test_sensors_agree();
 
 	if (g_fail == 0) {
 		std::printf("OK: all %d checks passed.\n", g_checks);
